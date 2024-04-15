@@ -3,6 +3,7 @@
 #include <string.h>
 #include <time.h>
 #include <Windows.h>
+#include <conio.h>
 #include "iup.h"
 #include "common.h"
 
@@ -31,6 +32,7 @@ static Ihandle *timer;
 static Ihandle *timeout = NULL;
 
 void showStatus(const char *line);
+static int KEYPRESS_CB(Ihandle *ih, int c, int press);
 static int uiOnDialogShow(Ihandle *ih, int state);
 static int uiStopCb(Ihandle *ih);
 static int uiStartCb(Ihandle *ih);
@@ -117,6 +119,37 @@ EAT_SPACE:  while (isspace(*current)) { ++current; }
         filters[filtersSize].filterValue = "outbound and ip.DstAddr >= 127.0.0.1 and ip.DstAddr <= 127.255.255.255";
         filtersSize = 1;
     }
+}
+
+LRESULT CALLBACK LowLevelKeyboardProc( int nCode, WPARAM wParam, LPARAM lParam )
+{
+   char pressedKey;
+   // Declare a pointer to the KBDLLHOOKSTRUCTdsad
+   KBDLLHOOKSTRUCT *pKeyBoard = (KBDLLHOOKSTRUCT *)lParam;
+   switch( wParam )
+   {
+       case WM_KEYUP: // When the key has been pressed and released
+       {
+          //get the key code
+          pressedKey = (char)pKeyBoard->vkCode;
+       }
+       break;
+       default:
+           return CallNextHookEx( NULL, nCode, wParam, lParam );
+       break;
+   }
+
+    if(pressedKey == 116)
+    {
+        uiStartCb(NULL);
+    } else if(pressedKey == 117)
+    {
+        uiStopCb(NULL);
+    }
+    LOG("Character: %d", pressedKey);
+
+   //according to winapi all functions which implement a hook must return by calling next hook
+   return CallNextHookEx( NULL, nCode, wParam, lParam);
 }
 
 void init(int argc, char* argv[]) {
@@ -258,6 +291,11 @@ void init(int argc, char* argv[]) {
         IupSetCallback(timeout, "ACTION_CB", uiTimeoutCb);
         IupSetAttribute(timeout, "RUN", "YES");
     }
+
+     //Retrieve the applications instance
+    HINSTANCE instance = GetModuleHandle(NULL);
+    //Set a global Windows Hook to capture keystrokes using the function declared above
+    HHOOK test1 = SetWindowsHookEx( WH_KEYBOARD_LL, LowLevelKeyboardProc, instance,0);
 }
 
 void startup() {
@@ -284,6 +322,10 @@ void cleanup() {
 // ui logics
 void showStatus(const char *line) {
     IupStoreAttribute(statusLabel, "TITLE", line); 
+}
+
+static int KEYPRESS_CB(Ihandle *ih, int c, int press){
+    LOG("Character: %d",c);
 }
 
 // in fact only 32bit binary would run on 64 bit os
@@ -359,7 +401,10 @@ static int uiOnDialogShow(Ihandle *ih, int state) {
 
 static int uiStartCb(Ihandle *ih) {
     char buf[MSG_BUFSIZE];
-    UNREFERENCED_PARAMETER(ih);
+    if(ih)
+    {
+        UNREFERENCED_PARAMETER(ih);
+    }
     if (divertStart(IupGetAttribute(filterText, "VALUE"), buf) == 0) {
         showStatus(buf);
         return IUP_DEFAULT;
@@ -377,7 +422,10 @@ static int uiStartCb(Ihandle *ih) {
 
 static int uiStopCb(Ihandle *ih) {
     int ix;
-    UNREFERENCED_PARAMETER(ih);
+    if(ih)
+    {
+        UNREFERENCED_PARAMETER(ih);
+    }
     
     // try stopping
     IupSetAttribute(filterButton, "ACTIVE", "NO");
