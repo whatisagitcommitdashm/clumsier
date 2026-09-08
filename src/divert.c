@@ -12,12 +12,27 @@
 #define QUEUE_LEN 2 << 10
 #define QUEUE_TIME 2 << 9 
 
-static HANDLE divertHandle;
-static volatile short stopLooping;
-static HANDLE loopThread, clockThread, mutex;
+static HANDLE divertHandle = INVALID_HANDLE_VALUE;
+static volatile LONG stopLooping;
+static HANDLE loopThread, clockThread, mutex, workersReady;
+// Only lifecycle callers take this lock; workers must never acquire it.
+static SRWLOCK lifecycleLock = SRWLOCK_INIT;
+static BOOL running;
 
-static DWORD divertReadLoop(LPVOID arg);
-static DWORD divertClockLoop(LPVOID arg);
+static DWORD WINAPI divertReadLoop(LPVOID arg);
+static DWORD WINAPI divertClockLoop(LPVOID arg);
+
+static BOOL stopping(void) {
+    return InterlockedCompareExchange(&stopLooping, 0, 0) != 0;
+}
+
+static void closeWorkerHandles(void) {
+    if (loopThread) CloseHandle(loopThread);
+    if (clockThread) CloseHandle(clockThread);
+    if (mutex) CloseHandle(mutex);
+    if (workersReady) CloseHandle(workersReady);
+    loopThread = clockThread = mutex = workersReady = NULL;
+}
 
 // not to put these in common.h since modules shouldn't see these
 extern PacketNode * const head;
@@ -80,6 +95,12 @@ void dumpPacket(char *buf, int len, PWINDIVERT_ADDRESS paddr) {
 int divertStart(const char *filter, char buf[]) {
     int ix;
 
+    AcquireSRWLockExclusive(&lifecycleLock);
+    if (running) {
+        ReleaseSRWLockExclusive(&lifecycleLock);
+        return TRUE; // Start is idempotent: preserve the current session.
+    }
+
     divertHandle = WinDivertOpen(filter, WINDIVERT_LAYER_NETWORK, DIVERT_PRIORITY, 0);
     if (divertHandle == INVALID_HANDLE_VALUE) {
         DWORD lastError = GetLastError();
@@ -89,12 +110,15 @@ int divertStart(const char *filter, char buf[]) {
             sprintf(buf, "Failed to start filtering : failed to open device (code:%lu).\n"
                 "Make sure you run clumsy as Administrator.", lastError);
         }
-        return FALSE;
+        goto failed;
     }
     LOG("Divert opened handle.");
 
-    WinDivertSetParam(divertHandle, WINDIVERT_PARAM_QUEUE_LENGTH, QUEUE_LEN);
-    WinDivertSetParam(divertHandle, WINDIVERT_PARAM_QUEUE_TIME, QUEUE_TIME);
+    if (!WinDivertSetParam(divertHandle, WINDIVERT_PARAM_QUEUE_LENGTH, QUEUE_LEN) ||
+        !WinDivertSetParam(divertHandle, WINDIVERT_PARAM_QUEUE_TIME, QUEUE_TIME)) {
+        sprintf(buf, "Failed to configure capture queue (%lu)", GetLastError());
+        goto failed;
+    }
     LOG("WinDivert internal queue Len: %d, queue time: %d", QUEUE_LEN, QUEUE_TIME);
 
     // init package link list
@@ -107,27 +131,47 @@ int divertStart(const char *filter, char buf[]) {
 
     // kick off the loop
     LOG("Creating threads and mutex...");
-    stopLooping = FALSE;
+    InterlockedExchange(&stopLooping, FALSE);
     mutex = CreateMutex(NULL, FALSE, NULL);
     if (mutex == NULL) {
         sprintf(buf, "Failed to create mutex (%lu)", GetLastError());
-        return FALSE;
+        goto failed;
     }
 
-    loopThread = CreateThread(NULL, 1, (LPTHREAD_START_ROUTINE)divertReadLoop, NULL, 0, NULL);
+    workersReady = CreateEvent(NULL, TRUE, FALSE, NULL);
+    if (!workersReady) {
+        sprintf(buf, "Failed to create worker startup event (%lu)", GetLastError());
+        goto failed;
+    }
+    loopThread = CreateThread(NULL, 0, divertReadLoop, NULL, 0, NULL);
     if (loopThread == NULL) {
         sprintf(buf, "Failed to create recv loop thread (%lu)", GetLastError());
-        return FALSE;
+        goto failed;
     }
-    clockThread = CreateThread(NULL, 1, (LPTHREAD_START_ROUTINE)divertClockLoop, NULL, 0, NULL);
+    clockThread = CreateThread(NULL, 0, divertClockLoop, NULL, 0, NULL);
     if (clockThread == NULL) {
         sprintf(buf, "Failed to create clock loop thread (%lu)", GetLastError());
-        return FALSE;
+        goto failed;
     }
 
     LOG("Threads created");
 
+    running = TRUE;
+    SetEvent(workersReady);
+    ReleaseSRWLockExclusive(&lifecycleLock);
     return TRUE;
+
+failed:
+    // A partially created worker cannot touch packets until this gate opens.
+    InterlockedExchange(&stopLooping, TRUE);
+    if (workersReady) SetEvent(workersReady);
+    if (loopThread) WaitForSingleObject(loopThread, INFINITE);
+    if (clockThread) WaitForSingleObject(clockThread, INFINITE);
+    if (divertHandle != INVALID_HANDLE_VALUE) WinDivertClose(divertHandle);
+    divertHandle = INVALID_HANDLE_VALUE;
+    closeWorkerHandles();
+    ReleaseSRWLockExclusive(&lifecycleLock);
+    return FALSE;
 }
 
 static int sendAllListPackets() {
@@ -236,90 +280,24 @@ static void divertConsumeStep() {
 }
 
 // periodically try to consume packets to keep the network responsive and not blocked by recv
-static DWORD divertClockLoop(LPVOID arg) {
-    DWORD startTick, stepTick, waitResult;
-    int ix;
-
+static DWORD WINAPI divertClockLoop(LPVOID arg) {
     UNREFERENCED_PARAMETER(arg);
-
-    for(;;) {
-        // use acquire as wait for yielding thread
-        startTick = GetTickCount();
-        waitResult = WaitForSingleObject(mutex, CLOCK_WAITMS);
-        switch(waitResult) {
-            case WAIT_OBJECT_0:
-                /***************** enter critical region ************************/
-                divertConsumeStep();
-                /***************** leave critical region ************************/
-                if (!ReleaseMutex(mutex)) {
-                    InterlockedIncrement16(&stopLooping);
-                    LOG("Fatal: Failed to release mutex (%lu)", GetLastError());
-                    ABORT();
-                }
-                // if didn't spent enough time, we sleep on it
-                stepTick = GetTickCount() - startTick;
-                if (stepTick < CLOCK_WAITMS) {
-                    Sleep(CLOCK_WAITMS - stepTick);
-                }
-                break;
-            case WAIT_TIMEOUT:
-                // read loop is processing, so we can skip this run
-                LOG("!!! Skipping one run");
-                Sleep(CLOCK_WAITMS);
-                break;
-            case WAIT_ABANDONED:
-                LOG("Acquired abandoned mutex");
-                InterlockedIncrement16(&stopLooping);
-                break;
-            case WAIT_FAILED:
-                LOG("Acquire failed (%lu)", GetLastError());
-                InterlockedIncrement16(&stopLooping);
-                break;
+    WaitForSingleObject(workersReady, INFINITE);
+    while (!stopping()) {
+        DWORD waitResult = WaitForSingleObject(mutex, CLOCK_WAITMS);
+        if (waitResult == WAIT_OBJECT_0) {
+            if (!stopping()) divertConsumeStep();
+            ReleaseMutex(mutex);
+        } else if (waitResult != WAIT_TIMEOUT) {
+            if (waitResult == WAIT_ABANDONED) ReleaseMutex(mutex);
+            InterlockedExchange(&stopLooping, TRUE);
+            return 1;
         }
-
-        // need to get the lock here
-        if (stopLooping) {
-            int lastSendCount = 0;
-            BOOL closed;
-
-            waitResult = WaitForSingleObject(mutex, INFINITE);
-            switch (waitResult)
-            {
-            case WAIT_ABANDONED:
-            case WAIT_FAILED:
-                LOG("Acquire failed/abandoned mutex (%lu), will still try closing and return", GetLastError());
-            case WAIT_OBJECT_0:
-                /***************** enter critical region ************************/
-                LOG("Read stopLooping, stopping...");
-                // clean up by closing all modules
-                for (ix = 0; ix < MODULE_CNT; ++ix) {
-                    Module *module = modules[ix];
-                    if (*(module->enabledFlag)) {
-                        module->closeDown(head, tail);
-                    } 
-                }
-                LOG("Send all packets upon closing");
-                lastSendCount = sendAllListPackets();
-                LOG("Lastly sent %d packets. Closing...", lastSendCount);
-
-                // terminate recv loop by closing handler. handle related error in recv loop to quit
-                closed = WinDivertClose(divertHandle);
-                assert(closed);
-
-                // release to let read loop exit properly
-                /***************** leave critical region ************************/
-                if (!ReleaseMutex(mutex)) {
-                    LOG("Fatal: Failed to release mutex (%lu)", GetLastError());
-                    ABORT();
-                }
-                return 0;
-                break;
-            }
-        }
+        Sleep(CLOCK_WAITMS);
     }
+    return 0;
 }
-
-static DWORD divertReadLoop(LPVOID arg) {
+static DWORD WINAPI divertReadLoop(LPVOID arg) {
     char packetBuf[MAX_PACKETSIZE];
     WINDIVERT_ADDRESS addrBuf;
     UINT readLen;
@@ -328,17 +306,18 @@ static DWORD divertReadLoop(LPVOID arg) {
 
     UNREFERENCED_PARAMETER(arg);
 
+    WaitForSingleObject(workersReady, INFINITE);
+    if (stopping()) return 0;
     for(;;) {
-        // each step must fully consume the list
-        assert(isListEmpty()); // FIXME has failed this assert before. don't know why
         if (!WinDivertRecv(divertHandle, packetBuf, MAX_PACKETSIZE, &readLen, &addrBuf)) {
             DWORD lastError = GetLastError();
-            if (lastError == ERROR_INVALID_HANDLE || lastError == ERROR_OPERATION_ABORTED) {
+            if (lastError == ERROR_NO_DATA || lastError == ERROR_INVALID_HANDLE || lastError == ERROR_OPERATION_ABORTED) {
                 // treat closing handle as quit
                 LOG("Handle died or operation aborted. Exit loop.");
                 return 0;
             }
             LOG("Failed to recv a packet. (%lu)", GetLastError());
+            if (stopping()) return 1;
             continue;
         }
         if (readLen > MAX_PACKETSIZE) {
@@ -352,17 +331,16 @@ static DWORD divertReadLoop(LPVOID arg) {
         switch(waitResult) {
             case WAIT_OBJECT_0:
                 /***************** enter critical region ************************/
-                if (stopLooping) {
-                    LOG("Lost last recved packet but user stopped. Stop read loop.");
-                    /***************** leave critical region ************************/
-                    if (!ReleaseMutex(mutex)) {
-                        LOG("Fatal: Failed to release mutex on stopping (%lu). Will stop anyway.", GetLastError());
-                    }
-                    return 0;
-                }
                 // create node and put it into the list
+                assert(isListEmpty());
                 pnode = createNode(packetBuf, readLen, &addrBuf);
                 appendNode(pnode);
+                // Retain this in-flight packet until Stop flushes module buffers.
+                // Stop drains the remainder of the driver's queue after we exit.
+                if (stopping()) {
+                    ReleaseMutex(mutex);
+                    return 0;
+                }
                 divertConsumeStep();
                 /***************** leave critical region ************************/
                 if (!ReleaseMutex(mutex)) {
@@ -385,13 +363,52 @@ static DWORD divertReadLoop(LPVOID arg) {
 }
 
 void divertStop() {
-    HANDLE threads[2];
-    threads[0] = loopThread;
-    threads[1] = clockThread;
+    int ix;
+    BOOL captureClosed = FALSE;
+    AcquireSRWLockExclusive(&lifecycleLock);
+    if (!running) {
+        ReleaseSRWLockExclusive(&lifecycleLock);
+        return;
+    }
 
     LOG("Stopping...");
-    InterlockedIncrement16(&stopLooping);
-    WaitForMultipleObjects(2, threads, TRUE, INFINITE);
+    InterlockedExchange(&stopLooping, TRUE);
+    // Stop new captures and wake a receiver blocked with no traffic.
+    if (!WinDivertShutdown(divertHandle, WINDIVERT_SHUTDOWN_RECV)) {
+        LOG("Receive shutdown failed (%lu); closing capture to unblock receiver", GetLastError());
+        WinDivertClose(divertHandle);
+        captureClosed = TRUE;
+    }
+    WaitForSingleObject(loopThread, INFINITE);
+    WaitForSingleObject(clockThread, INFINITE);
+
+    // Neither worker can access the lists now. Close only modules that started,
+    // even if the UI has just switched their enabled flag off.
+    for (ix = 0; ix < MODULE_CNT; ++ix) {
+        Module *module = modules[ix];
+        if (module->lastEnabled) {
+            module->closeDown(head, tail);
+            module->lastEnabled = 0;
+        }
+    }
+    sendAllListPackets();
+    if (!captureClosed) {
+        // Shutdown leaves the driver's existing queue readable. Bypass effects
+        // for these final packets rather than discarding them on handle close.
+        char packet[MAX_PACKETSIZE];
+        WINDIVERT_ADDRESS addr;
+        UINT len, sent;
+        while (WinDivertRecv(divertHandle, packet, sizeof(packet), &len, &addr)) {
+            if (!WinDivertSend(divertHandle, packet, len, &sent, &addr)) {
+                LOG("Failed to send queued packet during stop (%lu)", GetLastError());
+            }
+        }
+        WinDivertClose(divertHandle);
+    }
+    divertHandle = INVALID_HANDLE_VALUE;
+    closeWorkerHandles();
+    running = FALSE;
+    ReleaseSRWLockExclusive(&lifecycleLock);
 
     LOG("Successfully waited threads and stopped.");
 }

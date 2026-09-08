@@ -30,6 +30,7 @@ Ihandle *filterSelectList;
 static Ihandle *stateIcon;
 static Ihandle *timer;
 static Ihandle *timeout = NULL;
+static HHOOK keyboardHook;
 
 void showStatus(const char *line);
 static int KEYPRESS_CB(Ihandle *ih, int c, int press);
@@ -126,6 +127,7 @@ LRESULT CALLBACK LowLevelKeyboardProc( int nCode, WPARAM wParam, LPARAM lParam )
    char pressedKey;
    // Declare a pointer to the KBDLLHOOKSTRUCTdsad
    KBDLLHOOKSTRUCT *pKeyBoard = (KBDLLHOOKSTRUCT *)lParam;
+   if (nCode < 0) return CallNextHookEx(NULL, nCode, wParam, lParam);
    switch( wParam )
    {
        case WM_KEYUP: // When the key has been pressed and released
@@ -139,17 +141,23 @@ LRESULT CALLBACK LowLevelKeyboardProc( int nCode, WPARAM wParam, LPARAM lParam )
        break;
    }
 
-    if(pressedKey == 116)
-    {
-        uiStartCb(NULL);
-    } else if(pressedKey == 117)
-    {
-        uiStopCb(NULL);
+    if (pressedKey == VK_F5 || pressedKey == VK_F6) {
+        // Keep the Windows hook short; Start/Stop may wait for worker threads.
+        IupPostMessage(dialog, NULL, pressedKey, 0, NULL);
     }
     LOG("Character: %d", pressedKey);
 
    //according to winapi all functions which implement a hook must return by calling next hook
    return CallNextHookEx( NULL, nCode, wParam, lParam);
+}
+
+static int uiHotkeyCb(Ihandle *ih, const char *s, int key, double d, void *p) {
+    UNREFERENCED_PARAMETER(s);
+    UNREFERENCED_PARAMETER(d);
+    UNREFERENCED_PARAMETER(p);
+    if (key == VK_F5) return uiStartCb(ih);
+    if (key == VK_F6) return uiStopCb(ih);
+    return IUP_DEFAULT;
 }
 
 void init(int argc, char* argv[]) {
@@ -267,6 +275,7 @@ void init(int argc, char* argv[]) {
     IupSetAttribute(dialog, "SIZE", "480x"); // add padding manually to width
     IupSetAttribute(dialog, "RESIZE", "NO");
     IupSetCallback(dialog, "SHOW_CB", (Icallback)uiOnDialogShow);
+    IupSetCallback(dialog, "POSTMESSAGE_CB", (Icallback)uiHotkeyCb);
 
 
     // global layout settings to affect childrens
@@ -295,7 +304,7 @@ void init(int argc, char* argv[]) {
      //Retrieve the applications instance
     HINSTANCE instance = GetModuleHandle(NULL);
     //Set a global Windows Hook to capture keystrokes using the function declared above
-    HHOOK test1 = SetWindowsHookEx( WH_KEYBOARD_LL, LowLevelKeyboardProc, instance,0);
+    keyboardHook = SetWindowsHookEx( WH_KEYBOARD_LL, LowLevelKeyboardProc, instance,0);
 }
 
 void startup() {
@@ -309,7 +318,11 @@ void startup() {
 }
 
 void cleanup() {
-
+    if (keyboardHook) {
+        UnhookWindowsHookEx(keyboardHook);
+        keyboardHook = NULL;
+    }
+    divertStop();
     IupDestroy(timer);
     if (timeout) {
         IupDestroy(timeout);
@@ -429,7 +442,7 @@ static int uiStopCb(Ihandle *ih) {
     
     // try stopping
     IupSetAttribute(filterButton, "ACTIVE", "NO");
-    IupFlush(); // flush to show disabled state
+    // Do not pump UI events during shutdown: a hotkey could reenter this callback.
     divertStop();
 
     IupSetAttribute(filterText, "ACTIVE", "YES");

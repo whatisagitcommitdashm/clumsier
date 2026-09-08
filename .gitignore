@@ -12,6 +12,8 @@ obj_gmake
 # Local development and scratch outputs
 .zig-cache/
 .vs/
+/.vscode/
+/docs/LIFECYCLE-TESTING.md
 work/
 *.user
 *.suo
