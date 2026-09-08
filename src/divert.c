@@ -19,6 +19,14 @@ static HANDLE loopThread, clockThread, mutex, workersReady;
 static SRWLOCK lifecycleLock = SRWLOCK_INIT;
 static BOOL running;
 
+BOOL divertIsRunning(void) {
+    BOOL result;
+    AcquireSRWLockShared(&lifecycleLock);
+    result = running;
+    ReleaseSRWLockShared(&lifecycleLock);
+    return result;
+}
+
 static DWORD WINAPI divertReadLoop(LPVOID arg);
 static DWORD WINAPI divertClockLoop(LPVOID arg);
 

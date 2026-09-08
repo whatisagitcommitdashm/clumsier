@@ -161,6 +161,7 @@ void showStatus(const char* line);
 // WinDivert
 int divertStart(const char * filter, char buf[]);
 void divertStop();
+BOOL divertIsRunning(void);
 
 // utils
 // STR to convert int macro to string

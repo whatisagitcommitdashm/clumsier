@@ -6,6 +6,8 @@
 #include <conio.h>
 #include "iup.h"
 #include "common.h"
+#include "actions.h"
+#include "hotkeys.h"
 
 // ! the order decides which module get processed first
 Module* modules[MODULE_CNT] = {
@@ -30,12 +32,15 @@ Ihandle *filterSelectList;
 static Ihandle *stateIcon;
 static Ihandle *timer;
 static Ihandle *timeout = NULL;
-static HHOOK keyboardHook;
+static Ihandle *hotkeyInputs[ACTION_COUNT], *hotkeyStatus;
+static HotkeySettings hotkeySettings;
+static wchar_t hotkeyPath[MAX_PATH];
+static BOOL hotkeysInitialized;
 
 void showStatus(const char *line);
-static int KEYPRESS_CB(Ihandle *ih, int c, int press);
 static int uiOnDialogShow(Ihandle *ih, int state);
-static int uiStopCb(Ihandle *ih);
+static int uiToggleCaptureCb(Ihandle *ih);
+static void uiPerformAction(AppAction action);
 static int uiStartCb(Ihandle *ih);
 static int uiTimerCb(Ihandle *ih);
 static int uiTimeoutCb(Ihandle *ih);
@@ -122,42 +127,98 @@ EAT_SPACE:  while (isspace(*current)) { ++current; }
     }
 }
 
-LRESULT CALLBACK LowLevelKeyboardProc( int nCode, WPARAM wParam, LPARAM lParam )
-{
-   char pressedKey;
-   // Declare a pointer to the KBDLLHOOKSTRUCTdsad
-   KBDLLHOOKSTRUCT *pKeyBoard = (KBDLLHOOKSTRUCT *)lParam;
-   if (nCode < 0) return CallNextHookEx(NULL, nCode, wParam, lParam);
-   switch( wParam )
-   {
-       case WM_KEYUP: // When the key has been pressed and released
-       {
-          //get the key code
-          pressedKey = (char)pKeyBoard->vkCode;
-       }
-       break;
-       default:
-           return CallNextHookEx( NULL, nCode, wParam, lParam );
-       break;
-   }
-
-    if (pressedKey == VK_F5 || pressedKey == VK_F6) {
-        // Keep the Windows hook short; Start/Stop may wait for worker threads.
-        IupPostMessage(dialog, NULL, pressedKey, 0, NULL);
+static void uiShowHotkeySettings(const HotkeySettings *settings) {
+    int i;
+    for (i = 0; i < ACTION_COUNT; ++i) {
+        char text[HOTKEY_TEXT_SIZE];
+        hotkeyFormat(settings->bindings[i], text);
+        IupStoreAttribute(hotkeyInputs[i], "VALUE", text);
     }
-    LOG("Character: %d", pressedKey);
-
-   //according to winapi all functions which implement a hook must return by calling next hook
-   return CallNextHookEx( NULL, nCode, wParam, lParam);
 }
 
-static int uiHotkeyCb(Ihandle *ih, const char *s, int key, double d, void *p) {
-    UNREFERENCED_PARAMETER(s);
-    UNREFERENCED_PARAMETER(d);
-    UNREFERENCED_PARAMETER(p);
-    if (key == VK_F5) return uiStartCb(ih);
-    if (key == VK_F6) return uiStopCb(ih);
+static int uiApplyHotkeysCb(Ihandle *ih) {
+    HotkeySettings proposed;
+    char error[HOTKEY_ERROR_SIZE];
+    int i;
+    UNREFERENCED_PARAMETER(ih);
+    for (i = 0; i < ACTION_COUNT; ++i) {
+        if (!hotkeyParse(IupGetAttribute(hotkeyInputs[i], "VALUE"), &proposed.bindings[i], error)) {
+            IupStoreAttribute(hotkeyStatus, "TITLE", error);
+            return IUP_DEFAULT;
+        }
+    }
+    if (!hotkeySettingsPath(hotkeyPath, error) ||
+        !hotkeysApply(&proposed, hotkeyPath, error)) {
+        IupStoreAttribute(hotkeyStatus, "TITLE", error);
+        return IUP_DEFAULT;
+    }
+    hotkeySettings = proposed;
+    uiShowHotkeySettings(&hotkeySettings);
+    IupSetAttribute(hotkeyStatus, "TITLE", "Hotkeys applied and saved.");
     return IUP_DEFAULT;
+}
+
+static int uiDefaultHotkeysCb(Ihandle *ih) {
+    HotkeySettings defaults;
+    UNREFERENCED_PARAMETER(ih);
+    hotkeyDefaults(&defaults);
+    uiShowHotkeySettings(&defaults);
+    IupSetAttribute(hotkeyStatus, "TITLE", "Defaults shown. Choose Apply & Save to activate them.");
+    return IUP_DEFAULT;
+}
+
+static Ihandle *uiCreateHotkeyPanel(void) {
+    Ihandle *rows = IupVbox(NULL), *frame, *apply, *defaults;
+    int i;
+    for (i = 0; i < ACTION_COUNT; ++i) {
+        Ihandle *label = IupLabel(actionName((AppAction)i));
+        IupSetAttribute(label, "SIZE", "45x");
+        hotkeyInputs[i] = IupText(NULL);
+        IupSetAttribute(hotkeyInputs[i], "VISIBLECOLUMNS", "24");
+        IupSetAttribute(hotkeyInputs[i], "NC", "63");
+        IupAppend(rows, IupHbox(label, hotkeyInputs[i], NULL));
+    }
+    IupAppend(rows, IupLabel("Examples: F7, Ctrl+Alt+S, None. Letters/digits need a modifier."));
+    apply = IupButton("Apply & Save", NULL);
+    defaults = IupButton("Show defaults", NULL);
+    IupSetCallback(apply, "ACTION", uiApplyHotkeysCb);
+    IupSetCallback(defaults, "ACTION", uiDefaultHotkeysCb);
+    IupAppend(rows, IupHbox(apply, defaults, NULL));
+    hotkeyStatus = IupLabel("Hotkeys are not active yet.");
+    IupSetAttribute(hotkeyStatus, "WORDWRAP", "YES");
+    IupSetAttribute(hotkeyStatus, "EXPAND", "HORIZONTAL");
+    IupSetAttribute(hotkeyStatus, "SIZE", "300x48");
+    IupAppend(rows, hotkeyStatus);
+    IupSetAttribute(rows, "MARGIN", "4x4");
+    IupSetAttribute(rows, "GAP", "4");
+    frame = IupFrame(rows);
+    IupSetAttribute(frame, "TITLE", "Global hotkeys");
+    IupSetAttribute(frame, "EXPAND", "HORIZONTAL");
+    hotkeyDefaults(&hotkeySettings);
+    uiShowHotkeySettings(&hotkeySettings);
+    return frame;
+}
+
+static void uiInitializeHotkeys(void) {
+    char error[HOTKEY_ERROR_SIZE], notice[HOTKEY_ERROR_SIZE] = {0};
+    if (hotkeysInitialized) return;
+    if (!hotkeysOpen(uiPerformAction, error)) {
+        IupStoreAttribute(hotkeyStatus, "TITLE", error);
+        return;
+    }
+    hotkeysInitialized = TRUE;
+    if (!hotkeySettingsPath(hotkeyPath, notice) ||
+        !hotkeyLoad(hotkeyPath, &hotkeySettings, notice)) {
+        hotkeyDefaults(&hotkeySettings);
+    }
+    uiShowHotkeySettings(&hotkeySettings);
+    if (!hotkeysApply(&hotkeySettings, NULL, error)) {
+        char message[HOTKEY_ERROR_SIZE + 64];
+        sprintf(message, "No global hotkeys are active. %s", error);
+        IupStoreAttribute(hotkeyStatus, "TITLE", message);
+    } else {
+        IupStoreAttribute(hotkeyStatus, "TITLE", notice[0] ? notice : "Hotkeys active. Edit a binding and choose Apply & Save.");
+    }
 }
 
 void init(int argc, char* argv[]) {
@@ -210,7 +271,7 @@ void init(int argc, char* argv[]) {
     IupSetAttribute(filterText, "EXPAND", "HORIZONTAL");
     IupSetCallback(filterText, "VALUECHANGED_CB", (Icallback)uiFilterTextCb);
     IupSetAttribute(filterButton, "PADDING", "8x");
-    IupSetCallback(filterButton, "ACTION", uiStartCb);
+    IupSetCallback(filterButton, "ACTION", uiToggleCaptureCb);
     IupSetAttribute(topVbox, "NCMARGIN", "4x4");
     IupSetAttribute(topVbox, "NCGAP", "4x2");
     IupSetAttribute(controlHbox, "ALIGNMENT", "ACENTER");
@@ -266,6 +327,7 @@ void init(int argc, char* argv[]) {
         dialogVBox = IupVbox(
             topFrame,
             bottomFrame,
+            uiCreateHotkeyPanel(),
             statusLabel,
             NULL
         )
@@ -275,7 +337,6 @@ void init(int argc, char* argv[]) {
     IupSetAttribute(dialog, "SIZE", "480x"); // add padding manually to width
     IupSetAttribute(dialog, "RESIZE", "NO");
     IupSetCallback(dialog, "SHOW_CB", (Icallback)uiOnDialogShow);
-    IupSetCallback(dialog, "POSTMESSAGE_CB", (Icallback)uiHotkeyCb);
 
 
     // global layout settings to affect childrens
@@ -301,10 +362,6 @@ void init(int argc, char* argv[]) {
         IupSetAttribute(timeout, "RUN", "YES");
     }
 
-     //Retrieve the applications instance
-    HINSTANCE instance = GetModuleHandle(NULL);
-    //Set a global Windows Hook to capture keystrokes using the function declared above
-    keyboardHook = SetWindowsHookEx( WH_KEYBOARD_LL, LowLevelKeyboardProc, instance,0);
 }
 
 void startup() {
@@ -318,10 +375,7 @@ void startup() {
 }
 
 void cleanup() {
-    if (keyboardHook) {
-        UnhookWindowsHookEx(keyboardHook);
-        keyboardHook = NULL;
-    }
+    hotkeysClose();
     divertStop();
     IupDestroy(timer);
     if (timeout) {
@@ -337,9 +391,6 @@ void showStatus(const char *line) {
     IupStoreAttribute(statusLabel, "TITLE", line); 
 }
 
-static int KEYPRESS_CB(Ihandle *ih, int c, int press){
-    LOG("Character: %d",c);
-}
 
 // in fact only 32bit binary would run on 64 bit os
 // if this happens pop out message box and exit
@@ -403,6 +454,8 @@ static int uiOnDialogShow(Ihandle *ih, int state) {
     // try elevate and decides whether to exit
     exit = tryElevate(hWnd, parameterized);
 
+    if (!exit) uiInitializeHotkeys();
+
     if (!exit && parameterized) {
         setFromParameter(filterText, "VALUE", "filter");
         LOG("is parameterized, start filtering upon execution.");
@@ -412,57 +465,55 @@ static int uiOnDialogShow(Ihandle *ih, int state) {
     return exit ? IUP_CLOSE : IUP_DEFAULT;
 }
 
-static int uiStartCb(Ihandle *ih) {
-    char buf[MSG_BUFSIZE];
-    if(ih)
-    {
-        UNREFERENCED_PARAMETER(ih);
-    }
-    if (divertStart(IupGetAttribute(filterText, "VALUE"), buf) == 0) {
-        showStatus(buf);
-        return IUP_DEFAULT;
-    }
-
-    // successfully started
-    showStatus("Started filtering. Enable functionalities to take effect.");
-    IupSetAttribute(filterText, "ACTIVE", "NO");
-    IupSetAttribute(filterButton, "TITLE", "Stop");
-    IupSetCallback(filterButton, "ACTION", uiStopCb);
-    IupSetAttribute(timer, "RUN", "YES");
-
-    return IUP_DEFAULT;
+static int captureIsRunning(void *context) {
+    UNREFERENCED_PARAMETER(context);
+    return divertIsRunning();
 }
 
-static int uiStopCb(Ihandle *ih) {
-    int ix;
-    if(ih)
-    {
-        UNREFERENCED_PARAMETER(ih);
-    }
-    
-    // try stopping
-    IupSetAttribute(filterButton, "ACTIVE", "NO");
-    // Do not pump UI events during shutdown: a hotkey could reenter this callback.
+static int captureStart(void *context) {
+    return divertStart(IupGetAttribute(filterText, "VALUE"), (char*)context);
+}
+
+static void captureStop(void *context) {
+    UNREFERENCED_PARAMETER(context);
     divertStop();
+}
 
-    IupSetAttribute(filterText, "ACTIVE", "YES");
-    IupSetAttribute(filterButton, "TITLE", "Start");
-    IupSetAttribute(filterButton, "ACTIVE", "YES");
-    IupSetCallback(filterButton, "ACTION", uiStartCb);
-
-    // stop timer and clean up icons
-    IupSetAttribute(timer, "RUN", "NO");
-    for (ix = 0; ix < MODULE_CNT; ++ix) {
-        modules[ix]->processTriggered = 0; // use = here since is threads already stopped
-        IupSetAttribute(modules[ix]->iconHandle, "IMAGE", "none_icon");
+static void uiPerformAction(AppAction action) {
+    char error[MSG_BUFSIZE] = {0};
+    ActionTarget target = {error, captureIsRunning, captureStart, captureStop};
+    BOOL active;
+    int i;
+    if (!actionExecute(action, &target)) {
+        showStatus(error);
+        return;
     }
-    sendState = SEND_STATUS_NONE;
-    IupSetAttribute(stateIcon, "IMAGE", "none_icon");
+    active = divertIsRunning();
+    IupSetAttribute(filterText, "ACTIVE", active ? "NO" : "YES");
+    IupSetAttribute(filterButton, "TITLE", active ? "Stop" : "Start");
+    IupSetAttribute(timer, "RUN", active ? "YES" : "NO");
+    if (!active) {
+        for (i = 0; i < MODULE_CNT; ++i) {
+            modules[i]->processTriggered = 0;
+            IupSetAttribute(modules[i]->iconHandle, "IMAGE", "none_icon");
+        }
+        sendState = SEND_STATUS_NONE;
+        IupSetAttribute(stateIcon, "IMAGE", "none_icon");
+    }
+    showStatus(active ? "Started filtering. Enable functions to take effect." : "Stopped.");
+}
 
-    showStatus("Stopped. To begin again, edit criteria and click Start.");
+static int uiStartCb(Ihandle *ih) {
+    UNREFERENCED_PARAMETER(ih);
+    uiPerformAction(ACTION_START_CAPTURE);
     return IUP_DEFAULT;
 }
 
+static int uiToggleCaptureCb(Ihandle *ih) {
+    UNREFERENCED_PARAMETER(ih);
+    uiPerformAction(ACTION_TOGGLE_CAPTURE);
+    return IUP_DEFAULT;
+}
 static int uiToggleControls(Ihandle *ih, int state) {
     Ihandle *controls = (Ihandle*)IupGetAttribute(ih, CONTROLS_HANDLE);
     short *target = (short*)IupGetAttribute(ih, SYNCED_VALUE);

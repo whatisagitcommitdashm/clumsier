@@ -97,6 +97,9 @@ pub fn build(b: *std.build.Builder) void {
     exe.step.dependOn(&cmd.step);
     exe.addObjectFile(res_obj_path);
     exe.addCSourceFile("src/bandwidth.c", &.{""});
+    exe.addCSourceFile("src/actions.c", &.{""});
+    exe.addCSourceFile("src/hotkeys.c", &.{""});
+    exe.addCSourceFile("src/hotkey_settings.c", &.{""});
     exe.addCSourceFile("src/divert.c", &.{""});
     exe.addCSourceFile("src/drop.c", &.{""});
     exe.addCSourceFile("src/duplicate.c", &.{""});
@@ -135,6 +138,7 @@ pub fn build(b: *std.build.Builder) void {
     exe.linkSystemLibrary("comdlg32");
     exe.linkSystemLibrary("uuid");
     exe.linkSystemLibrary("ole32");
+    exe.linkSystemLibrary("shell32");
 
     const exe_install_step = b.addInstallArtifact(exe);  
     if (conf == .Ship)
