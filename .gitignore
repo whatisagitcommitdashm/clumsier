@@ -8,3 +8,13 @@ etc/clumsy.aps
 obj_vs
 obj_ninja
 obj_gmake
+
+# Local development and scratch outputs
+.zig-cache/
+.vs/
+work/
+*.user
+*.suo
+.env
+.env.*
+!.env.example

@@ -1,28 +1,29 @@
-# clumsy
+# Clumsier
 
-__clumsy makes your network condition on Windows significantly worse, but in a managed and interactive manner.__
+A Windows network-condition tool evolving from Clumsy, with planned customizable hotkeys, reusable sequences, and a cleaner interface.
 
-Leveraging the awesome [WinDivert](http://reqrypt.org/windivert.html), clumsy stops living network packets and capture them, lag/drop/tamper/.. the packets on demand, then send them away. Whether you want to track down weird bugs related to broken network, or evaluate your application on poor connections, clumsy will come in handy:
+**Initialization.** Application code is still the inherited version; planned features are not implemented and the build has not yet been verified for this project.
 
-Use F5 to start and F6 to stop the program.
+## Origins and attribution
 
-* No installation.
-* No need for proxy setup or code change in your application.
-* System wide network capturing means it works on any application.
-* Works even if you're offline (ie, connecting from localhost to localhost).
-* Your application keeps running, while clumsy can start and stop anytime.
-* Interactive control how bad the network can be, with enough visual feedback to tell you what's going on.
+Independently maintained by [niko (whatisagitcommitdashm)](https://github.com/whatisagitcommitdashm), starting from [Auzgame/clumsy0.3-with-keybinds](https://github.com/Auzgame/clumsy0.3-with-keybinds), itself derived from [jagt/clumsy](https://github.com/jagt/clumsy) by Chen Tao and contributors. Original Git history and license notices are preserved. This is not an official release from either upstream project.
 
-See [this page](http://jagt.github.io/clumsy) for more info and build instructions.
+Baseline commit: `357e1e67a5803ffdd7d483b463575508a0a5f578`.
 
+## Planned features
 
-## Details
+- Reliable Start, Stop, and Toggle behavior.
+- Saved presets and arbitrary-length sequences of named steps.
+- Configurable global hotkeys and a searchable preset launcher.
+- Optional mouse-wheel adjustment of added delay.
+- Preset import/export and a customizable home screen.
 
-Simulate network latency, delay, packet loss with clumsy on Windows 7/8/10:
+## Development
 
-![](clumsy-demo.gif)
+See [repository setup](docs/REPOSITORY-SETUP.md), [build status](docs/BUILDING.md), and [roadmap](docs/ROADMAP.md).
 
+The inherited F5 start hotkey seems to disrupt connectivity when pressed repeatedly. My initial priority is to better understand this bug, then to find and test a solution.
 
 ## License
 
-MIT
+The original [MIT license](LICENSE) is retained; original Clumsier additions are also provided under MIT. Bundled dependencies retain their separate licenses. Release packaging must include the appropriate notices and meet their redistribution requirements.
