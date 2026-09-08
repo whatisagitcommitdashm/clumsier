@@ -37,7 +37,7 @@ solution('clumsy')
     project('clumsy')
         language("C")
         files({'src/**.c', 'src/**.h'})
-        links({'WinDivert', 'iup', 'comctl32', 'Winmm', 'ws2_32'}) 
+        links({'WinDivert', 'iup', 'user32', 'shell32', 'comctl32', 'Winmm', 'ws2_32'})
         if string.match(_ACTION, '^vs') then -- only vs can include rc file in solution
             files({'./etc/clumsy.rc'})
         elseif _ACTION == MINGW_ACTION then
@@ -164,4 +164,3 @@ solution('clumsy')
         set_bin(MINGW_ACTION, 'Debug', "x64")
         set_bin(MINGW_ACTION, 'Release', "x32")
         set_bin(MINGW_ACTION, 'Release', "x64")
-

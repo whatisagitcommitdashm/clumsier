@@ -11,6 +11,8 @@ const char *actionName(AppAction action) {
 
 int actionExecute(AppAction action, const ActionTarget *target) {
     if (action == ACTION_TOGGLE_CAPTURE) {
+        // The button or another action may have changed capture since the last
+        // toggle. Ask the engine instead of keeping a second running flag here.
         action = target->isRunning(target->context)
             ? ACTION_STOP_CAPTURE : ACTION_START_CAPTURE;
     }

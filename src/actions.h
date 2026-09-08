@@ -7,8 +7,10 @@ typedef enum {
     ACTION_COUNT
 } AppAction;
 
-// The application supplies these operations. No UI or Windows types are needed.
-// Dispatch actions on the application's control thread, in event order.
+// The caller supplies the capture operations, so dispatch also works without
+// IUP (including in tests). context is passed through unchanged; the UI uses it
+// for the buffer that receives startup errors.
+// Call on the application's control thread so actions run in event order.
 typedef struct {
     void *context;
     int (*isRunning)(void *context);

@@ -12,11 +12,19 @@ Baseline commit: `357e1e67a5803ffdd7d483b463575508a0a5f578`.
 
 ## Global hotkeys
 
-For now, the implementation has 3 customizable keybinds: Start, Stop, and Toggle. Start leaves an already running capture running, or starts one if none are running. Stop leaves a stop capture stopped, or stops an active one. Toggle toggles between those states. To customize, type a combination for each action and choose "Apply & Save". 
+The defaults are **F5: Start**, **F6: Stop**, and **F7: Toggle**. Start leaves an already running capture running; Stop leaves a stopped capture stopped. Toggle switches between those states.
 
-Duplicate bindings are rejected. If registering or saving new bindings fails, the previous bindings stay active. If registration fails at startup, no global hotkeys are enabled; the panel explains the conflict so you can edit the bindings. The on-screen Start/Stop button remains available.
+Click a binding field or its **Record** button. Hold the desired keys and/or mouse buttons together, then release them. The first release fixes the combination; recording finishes once all inputs are released. The opening click is excluded. Click **Cancel** to discard a recording; Escape itself can be recorded. Normal hotkey actions are suspended during recording.
 
-Settings are stored in `%LOCALAPPDATA%\Clumsier\hotkeys.ini`, independently of packet-filter presets. **Show defaults** only fills the editor; choose **Apply & Save** to activate and save them. An invalid settings file is reported and left untouched until you explicitly save replacement settings.
+Choose **Apply & Save** to activate the edited bindings and remember them across restarts. **Clear** unassigns a binding in the editor. **Show defaults** fills in F5/F6/F7; both changes also require Apply & Save.
+
+Supported combinations include bare letters or digits (`W`, `7`), several ordinary keys (`Q + E`), modifiers, and mouse buttons (`Ctrl + Mouse4`). Mouse1/2/3 mean left/right/middle; Mouse4/5 are the two extra buttons. Left and right modifiers are interchangeable. Function keys, navigation keys, punctuation, and other Windows virtual keys are also supported. Uncommon keys use a stable `KeyXX` label; punctuation labels follow US key names. Keyboard hardware and Windows shortcuts can limit which combinations are observable. Mouse-wheel bindings and sequences of separate presses are not implemented yet.
+
+**Input passes through:** Clumsier forwards keyboard and mouse presses and releases, so binding W does not block movement in the game. Other applications can also act on the same combination. This replaces the previous exclusive Windows hotkey registration, so Clumsier no longer reports another application's registered shortcuts as conflicts.
+
+A combination fires when all its inputs are down, regardless of their press order. Extra held inputs are allowed, so movement keys do not block another hotkey. Holding a combination does not repeat it; releasing and pressing one of its members again rearms it. Two bindings cannot be identical or contain one another (for example, `Q` and `Q + E`). Otherwise both matching bindings may fire if their inputs are held together. Hotkeys are global, including while Clumsier is focused; recording is the exception.
+
+Settings remain in `%LOCALAPPDATA%\Clumsier\hotkeys.ini`. Existing version-1 settings load automatically; Apply & Save writes version 2. Failed validation or saving leaves the active bindings unchanged. Invalid files are reported and preserved until you explicitly save replacement settings. Bindings remain separate from packet-filter presets.
 
 ## Planned features
 

@@ -99,6 +99,7 @@ pub fn build(b: *std.build.Builder) void {
     exe.addCSourceFile("src/bandwidth.c", &.{""});
     exe.addCSourceFile("src/actions.c", &.{""});
     exe.addCSourceFile("src/hotkeys.c", &.{""});
+    exe.addCSourceFile("src/hotkey_matcher.c", &.{""});
     exe.addCSourceFile("src/hotkey_settings.c", &.{""});
     exe.addCSourceFile("src/divert.c", &.{""});
     exe.addCSourceFile("src/drop.c", &.{""});

@@ -1,169 +1,232 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
-#include "hotkeys.h"
+#include "hotkey_matcher.h"
 
-// Deterministic registration failures exercise rollback without depending on
-// which shortcuts happen to be occupied on the developer's desktop.
-static struct { int id; UINT modifiers, key; } registrations[16];
-static int registerCalls, failOnCall, realRegistration;
-static BOOL testRegister(HWND window, int id, UINT modifiers, UINT key) {
-    int i;
-    ++registerCalls;
-    if (realRegistration) return RegisterHotKey(window, id, modifiers, key);
-    if (failOnCall && registerCalls == failOnCall) {
-        SetLastError(ERROR_HOTKEY_ALREADY_REGISTERED); return FALSE;
-    }
-    assert(modifiers & MOD_NOREPEAT);
-    for (i = 0; i < 16; ++i) {
-        if (registrations[i].id && registrations[i].modifiers == modifiers && registrations[i].key == key) {
-            SetLastError(ERROR_HOTKEY_ALREADY_REGISTERED); return FALSE;
-        }
-    }
-    for (i = 0; i < 16; ++i) if (!registrations[i].id) {
-        registrations[i].id = id; registrations[i].modifiers = modifiers;
-        registrations[i].key = key; return TRUE;
-    }
-    assert(0); return FALSE;
+// Observe forwarding without injecting input into the user's desktop.
+static int forwarded, posted, installs, removals, failInstall;
+static WPARAM postedInput;
+static LRESULT testForward(HHOOK hook, int code, WPARAM message, LPARAM data) {
+    (void)hook; (void)code; (void)message; (void)data;
+    ++forwarded;
+    return 123;
 }
-static BOOL testUnregister(HWND window, int id) {
-    int i;
-    if (realRegistration) return UnregisterHotKey(window, id);
-    for (i = 0; i < 16; ++i) if (registrations[i].id == id) {
-        registrations[i].id = 0; return TRUE;
-    }
-    assert(0); return FALSE;
+static BOOL testPost(HWND window, UINT message, WPARAM data, LPARAM generation) {
+    (void)window; (void)message; (void)generation;
+    ++posted; postedInput = data;
+    return TRUE;
 }
-#define RegisterHotKey testRegister
-#define UnregisterHotKey testUnregister
+static HHOOK testInstall(int kind, HOOKPROC callback, HINSTANCE instance, DWORD thread) {
+    (void)kind; (void)callback; (void)instance; (void)thread;
+    if (++installs == failInstall) { SetLastError(ERROR_ACCESS_DENIED); return NULL; }
+    return (HHOOK)(INT_PTR)installs;
+}
+static BOOL testRemove(HHOOK hook) { assert(hook); ++removals; return TRUE; }
+#define CallNextHookEx testForward
+#define PostMessageW testPost
+#define SetWindowsHookExW testInstall
+#define UnhookWindowsHookEx testRemove
 #include "../src/hotkeys.c"
-#undef RegisterHotKey
-#undef UnregisterHotKey
+#undef CallNextHookEx
+#undef PostMessageW
+#undef SetWindowsHookExW
+#undef UnhookWindowsHookEx
 
-static int dispatched[ACTION_COUNT], captureRunning, starts, stops;
-static void recordAction(AppAction action) { ++dispatched[action]; }
-static int isRunning(void *context) { (void)context; return captureRunning; }
-static int start(void *context) { (void)context; ++starts; captureRunning = 1; return 1; }
-static void stop(void *context) { (void)context; ++stops; captureRunning = 0; }
-static void sameSettings(const HotkeySettings *a, const HotkeySettings *b) {
-    int i;
-    for (i = 0; i < ACTION_COUNT; ++i) assert(sameBinding(a->bindings[i], b->bindings[i]));
+static char error[HOTKEY_ERROR_SIZE];
+static int dispatched[ACTION_COUNT], recordings, finishedRecordings;
+static HotkeyBinding lastRecorded;
+static int captureRunning, failStart;
+static int captureIsRunning(void *context) { (void)context; return captureRunning; }
+static int captureStart(void *context) {
+    (void)context;
+    if (failStart) return 0;
+    captureRunning = 1; return 1;
 }
-static int registrationCount(void) {
-    int i, count = 0;
-    for (i = 0; i < 16; ++i) if (registrations[i].id) ++count;
-    return count;
+static void captureStop(void *context) { (void)context; captureRunning = 0; }
+static void testActions(void) {
+    ActionTarget target = {NULL, captureIsRunning, captureStart, captureStop};
+    assert(actionExecute(ACTION_TOGGLE_CAPTURE, &target) && captureRunning);
+    assert(actionExecute(ACTION_TOGGLE_CAPTURE, &target) && !captureRunning);
+    captureRunning = 1;
+    assert(actionExecute(ACTION_TOGGLE_CAPTURE, &target) && !captureRunning);
+    failStart = 1;
+    assert(!actionExecute(ACTION_TOGGLE_CAPTURE, &target) && !captureRunning);
+    assert(!actionExecute(ACTION_COUNT, &target));
+    puts("PASS action dispatch uses current capture state and propagates start failures");
+}
+static void recordAction(AppAction action) { ++dispatched[action]; }
+static void recordBinding(const HotkeyBinding *binding, BOOL finished) {
+    ++recordings; finishedRecordings += finished;
+    lastRecorded = *binding;
+}
+static HotkeyBinding parse(const char *text) {
+    HotkeyBinding binding;
+    assert(hotkeyParse(text, &binding, error));
+    return binding;
 }
 static void writeText(const wchar_t *path, const char *text) {
     FILE *file = _wfopen(path, L"wb"); assert(file);
     assert(fwrite(text, 1, strlen(text), file) == strlen(text));
     assert(!fclose(file));
 }
-
-int main(void) {
-    char error[HOTKEY_ERROR_SIZE], text[HOTKEY_TEXT_SIZE];
+static void testParsing(void) {
+    HotkeySettings settings = {0};
+    HotkeyBinding a, b;
+    char text[HOTKEY_TEXT_SIZE];
+    int key;
+    hotkeyDefaults(&settings);
+    assert(settings.bindings[0].keys[VK_F5] && settings.bindings[1].keys[VK_F6] && settings.bindings[2].keys[VK_F7]);
+    a = parse("ctrl + w + e + Mouse4 + 7");
+    hotkeyFormat(a, text); b = parse(text); assert(!memcmp(&a, &b, sizeof(a)));
+    assert(parse("W").keys['W']); assert(parse("7").keys['7']);
+    assert(parse("F12").keys[VK_F12]); assert(parse("Escape").keys[VK_ESCAPE]);
+    assert(parse("Numpad0 + LeftBracket").keys[VK_NUMPAD0]);
+    assert(!hotkeyParse("Q+Q", &b, error));
+    assert(!hotkeyParse("Ctrl+", &b, error));
+    assert(!hotkeyParse("None+Q", &b, error));
+    assert(!hotkeyParse("F25", &b, error));
+    settings.bindings[0] = parse("Q"); settings.bindings[1] = parse("Q+E");
+    assert(!hotkeyValidate(&settings, error));
+    settings.bindings[0] = parse("Q+E"); settings.bindings[1] = parse("Q");
+    assert(!hotkeyValidate(&settings, error));
+    settings.bindings[1] = settings.bindings[0]; assert(!hotkeyValidate(&settings, error));
+    settings.bindings[1] = parse("Q+R"); assert(hotkeyValidate(&settings, error));
+    // Exercise the entire representable key space, not a four-key special case.
+    memset(&a, 0, sizeof(a));
+    for (key = 1; key < HOTKEY_KEY_COUNT; ++key) a.keys[hotkeyNormalize(key)] = 1;
+    hotkeyFormat(a, text); b = parse(text); assert(!memcmp(&a, &b, sizeof(a)));
+    puts("PASS bare keys, mouse and long chords, formatting, duplicates and subset conflicts");
+}
+static void testMatching(void) {
+    HotkeyMatcher state = {0};
+    HotkeySettings settings = {0};
+    settings.bindings[0] = parse("Q+E");
+    settings.bindings[1] = parse("Ctrl+Mouse4");
+    settings.bindings[2] = parse("W");
+    hotkeyMatcherApply(&state, &settings);
+    assert(hotkeyMatcherInput(&state, 'W', TRUE) == 4);
+    assert(!hotkeyMatcherInput(&state, 'W', TRUE));
+    assert(!hotkeyMatcherInput(&state, 'E', TRUE));
+    assert(hotkeyMatcherInput(&state, 'Q', TRUE) == 1); // Extra W is allowed.
+    assert(!hotkeyMatcherInput(&state, 'Q', FALSE));
+    assert(hotkeyMatcherInput(&state, 'Q', TRUE) == 1);
+    assert(!hotkeyMatcherInput(&state, VK_LCONTROL, TRUE));
+    assert(hotkeyMatcherInput(&state, VK_XBUTTON1, TRUE) == 2);
+    assert(!hotkeyMatcherInput(&state, VK_RCONTROL, TRUE));
+    assert(!hotkeyMatcherInput(&state, VK_LCONTROL, FALSE));
+    assert(state.down.keys[VK_CONTROL]);
+    assert(!hotkeyMatcherInput(&state, VK_XBUTTON1, TRUE));
+    assert(!hotkeyMatcherInput(&state, VK_XBUTTON1, FALSE));
+    assert(hotkeyMatcherInput(&state, VK_XBUTTON1, TRUE) == 2);
+    hotkeyMatcherApply(&state, &settings);
+    assert(!hotkeyMatcherInput(&state, 'W', FALSE));
+    assert(!hotkeyMatcherInput(&state, 'W', TRUE)); // Editing waits for release.
+    for (int key = 1; key < HOTKEY_KEY_COUNT; ++key) hotkeyMatcherInput(&state, key, FALSE);
+    assert(hotkeyMatcherInput(&state, 'W', TRUE) == 4);
+    puts("PASS order-independent matching, extra movement keys, repeat suppression and modifier release");
+}
+static void testRecording(void) {
+    HotkeyMatcher state = {0};
+    HotkeySettings settings = {0};
+    settings.bindings[0] = parse("Q"); hotkeyMatcherApply(&state, &settings);
+    hotkeyMatcherInput(&state, VK_LBUTTON, TRUE);
+    hotkeyMatcherRecord(&state);
+    assert(!hotkeyMatcherInput(&state, VK_LBUTTON, FALSE)); // Initiating click excluded.
+    assert(!hotkeyMatcherInput(&state, 'Q', TRUE)); // Bound action suspended.
+    hotkeyMatcherInput(&state, 'E', TRUE);
+    hotkeyMatcherInput(&state, VK_XBUTTON2, TRUE);
+    hotkeyMatcherInput(&state, 'Q', FALSE); // First release freezes the chord.
+    hotkeyMatcherInput(&state, 'R', TRUE); // A subsequent press is not a sequence.
+    hotkeyMatcherInput(&state, 'E', FALSE);
+    hotkeyMatcherInput(&state, VK_XBUTTON2, FALSE);
+    assert(state.recording);
+    hotkeyMatcherInput(&state, 'R', FALSE);
+    assert(!state.recording && state.recorded.keys['Q'] && state.recorded.keys['E']);
+    assert(state.recorded.keys[VK_XBUTTON2] && !state.recorded.keys['R'] && !state.recorded.keys[VK_LBUTTON]);
+    hotkeyMatcherRecord(&state);
+    hotkeyMatcherInput(&state, 'Q', TRUE);
+    hotkeyMatcherCancel(&state);
+    assert(!hotkeyMatcherInput(&state, 'Q', TRUE));
+    assert(!hotkeyMatcherInput(&state, 'Q', FALSE));
+    assert(hotkeyMatcherInput(&state, 'Q', TRUE) == 1);
+    puts("PASS recording, initiating-click exclusion, first-release boundary, cancellation and suppression");
+}
+static void testPersistence(void) {
     wchar_t directory[MAX_PATH], path[MAX_PATH], badPath[MAX_PATH];
-    HotkeySettings defaults, proposed, loaded;
-    HotkeyBinding binding;
-    ActionTarget target = {NULL, isRunning, start, stop};
-    ActiveHotkey previous[ACTION_COUNT];
-    int i, staleId;
-
-    assert(actionExecute(ACTION_TOGGLE_CAPTURE, &target) && captureRunning);
-    assert(actionExecute(ACTION_TOGGLE_CAPTURE, &target) && !captureRunning);
-    assert(starts == 1 && stops == 1);
-    captureRunning = 1; // State changed outside Toggle, e.g. the Start button.
-    assert(actionExecute(ACTION_TOGGLE_CAPTURE, &target) && !captureRunning);
-    assert(!actionExecute(ACTION_COUNT, &target));
-    puts("PASS action dispatch and toggle using current engine state");
-
-    hotkeyDefaults(&defaults);
-    assert(defaults.bindings[0].key == VK_F5 && defaults.bindings[1].key == VK_F6 && defaults.bindings[2].key == VK_F7);
-    assert(hotkeyParse(" ctrl + ALT + s ", &binding, error));
-    hotkeyFormat(binding, text); assert(!strcmp(text, "Ctrl+Alt+S"));
-    assert(!hotkeyParse("Ctrl+Ctrl+S", &binding, error));
-    assert(!hotkeyParse("Ctrl+", &binding, error));
-    assert(!hotkeyParse("F12", &binding, error));
-    assert(!hotkeyParse("F25", &binding, error));
-    assert(!hotkeyParse("S", &binding, error));
-    assert(hotkeyParse("None", &binding, error) && !binding.key);
-    proposed = defaults; proposed.bindings[2] = proposed.bindings[1];
-    assert(!hotkeyValidate(&proposed, error));
-    puts("PASS defaults, parsing, reserved keys, and duplicate validation");
-
-    assert(GetTempPathW(MAX_PATH, directory));
-    assert(GetTempFileNameW(directory, L"chk", 0, path));
-    assert(DeleteFileW(path));
-    assert(hotkeyLoad(path, &loaded, error)); sameSettings(&loaded, &defaults);
-    proposed = defaults; assert(hotkeyParse("Ctrl+Alt+S", &proposed.bindings[0], error));
-    assert(hotkeySave(path, &proposed, error));
-    assert(hotkeyLoad(path, &loaded, error)); sameSettings(&loaded, &proposed);
-    writeText(path, "version=2\nstart=F5\nstop=F6\ntoggle=F7\n");
-    assert(!hotkeyLoad(path, &loaded, error)); sameSettings(&loaded, &proposed);
-    writeText(path, "version=1\nstart=F5\nstop=F5\ntoggle=F7\n");
-    assert(!hotkeyLoad(path, &loaded, error));
-    writeText(path, "version=1\nstart=F5\nstop=F6\n");
-    assert(!hotkeyLoad(path, &loaded, error));
-    assert(hotkeySave(path, &defaults, error));
-    puts("PASS settings round-trip, missing file, malformed file, and version rejection");
-
-    assert(hotkeysOpen(recordAction, error));
-    assert(hotkeysApply(&defaults, NULL, error));
-    memcpy(previous, active, sizeof(previous));
-    proposed = defaults;
-    proposed.bindings[0] = defaults.bindings[1];
-    proposed.bindings[1] = defaults.bindings[0];
-    i = registerCalls;
-    assert(hotkeysApply(&proposed, path, error));
-    assert(registerCalls == i && active[0].registrationId == previous[1].registrationId);
-    SendMessageW(messageWindow, WM_HOTKEY, active[0].registrationId, MAKELPARAM(0, VK_F6));
-    assert(dispatched[ACTION_START_CAPTURE] == 1);
-    assert(hotkeyLoad(path, &loaded, error)); sameSettings(&loaded, &proposed);
-    puts("PASS rebinding swaps without releasing working shortcuts; action delivery");
-
-    memcpy(previous, active, sizeof(previous));
-    proposed = defaults;
-    proposed.bindings[0].key = VK_F8; proposed.bindings[1].key = VK_F9;
-    failOnCall = registerCalls + 2;
-    assert(!hotkeysApply(&proposed, path, error));
-    assert(!memcmp(previous, active, sizeof(previous)) && registrationCount() == 3);
-    failOnCall = 0;
-    // Use the existing settings file as a directory: saving must fail.
-    swprintf(badPath, MAX_PATH, L"%ls\\settings.ini", path);
-    assert(!hotkeysApply(&proposed, badPath, error));
-    assert(!memcmp(previous, active, sizeof(previous)) && registrationCount() == 3);
-    assert(hotkeyLoad(path, &proposed, error)); sameSettings(&loaded, &proposed);
-    puts("PASS registration and save failures preserve previous bindings and file");
-
-    staleId = active[2].registrationId;
-    proposed.bindings[2].key = proposed.bindings[2].modifiers = 0;
-    assert(hotkeysApply(&proposed, NULL, error));
-    SendMessageW(messageWindow, WM_HOTKEY, staleId, MAKELPARAM(0, VK_F7));
-    assert(dispatched[ACTION_TOGGLE_CAPTURE] == 0 && registrationCount() == 2);
-    hotkeysClose(); assert(registrationCount() == 0);
-    assert(hotkeysOpen(recordAction, error));
+    HotkeySettings settings = {0}, loaded, previous;
+    assert(GetTempPathW(MAX_PATH, directory)); assert(GetTempFileNameW(directory, L"chk", 0, path));
+    assert(DeleteFileW(path)); assert(hotkeyLoad(path, &loaded, error));
+    assert(loaded.bindings[2].keys[VK_F7]);
+    writeText(path, "version=1\nstart=Ctrl+Alt+S\nstop=F6\ntoggle=F7\n");
     assert(hotkeyLoad(path, &loaded, error));
-    assert(hotkeysApply(&loaded, NULL, error));
-    hotkeysClose(); assert(registrationCount() == 0);
-    puts("PASS unassignment, stale messages, cleanup, and reopening saved settings");
-
-    // Exercise actual Windows registration and conflict reporting with an
-    // uncommon shortcut. No keyboard input or capture action is generated.
-    realRegistration = 1;
-    assert(hotkeysOpen(recordAction, error));
-    memset(&proposed, 0, sizeof(proposed));
-    proposed.bindings[0].key = VK_F23;
-    proposed.bindings[0].modifiers = MOD_CONTROL | MOD_ALT | MOD_SHIFT;
-    if (hotkeysApply(&proposed, NULL, error)) {
-        assert(!RegisterHotKey(NULL, 12345, MOD_CONTROL | MOD_ALT | MOD_SHIFT | MOD_NOREPEAT, VK_F23));
-        hotkeysClose();
-        assert(RegisterHotKey(NULL, 12345, MOD_CONTROL | MOD_ALT | MOD_SHIFT | MOD_NOREPEAT, VK_F23));
-        assert(UnregisterHotKey(NULL, 12345));
-        puts("PASS actual Windows registration, conflict, and release");
-    } else {
-        hotkeysClose();
-        printf("SKIP Windows registration integration: %s\n", error);
-    }
+    assert(loaded.bindings[0].keys[VK_CONTROL] && loaded.bindings[0].keys['S']);
+    settings.bindings[0] = parse("Q+E+Mouse4"); settings.bindings[1] = parse("7");
+    assert(hotkeySave(path, &settings, error)); assert(hotkeyLoad(path, &loaded, error));
+    assert(!memcmp(&settings, &loaded, sizeof(settings)));
+    previous = loaded;
+    writeText(path, "version=99\nstart=W\nstop=F6\ntoggle=F7\n");
+    assert(!hotkeyLoad(path, &loaded, error)); assert(!memcmp(&loaded, &previous, sizeof(loaded)));
+    writeText(path, "version=2\nstart=Q\nstop=Q+E\ntoggle=F7\n");
+    assert(!hotkeyLoad(path, &loaded, error));
+    writeText(path, "version=2\nstart=Q\nstop=F6\n"); assert(!hotkeyLoad(path, &loaded, error));
+    assert(hotkeySave(path, &settings, error));
+    swprintf(badPath, MAX_PATH, L"%ls\\settings.ini", path);
+    assert(hotkeysApply(&settings, NULL, error)); previous = matcher.settings;
+    settings.bindings[0] = parse("A+B+C");
+    assert(!hotkeysApply(&settings, badPath, error));
+    assert(!memcmp(&matcher.settings, &previous, sizeof(previous)));
+    assert(hotkeyLoad(path, &loaded, error)); assert(!memcmp(&loaded, &previous, sizeof(loaded)));
     assert(DeleteFileW(path));
+    puts("PASS version-1 migration, version-2 round trip, malformed files and save-failure rollback");
+}
+static void testForwarding(void) {
+    KBDLLHOOKSTRUCT key = {0};
+    MSLLHOOKSTRUCT mouse = {0};
+    int before;
+    key.vkCode = 'W';
+    before = posted;
+    assert(keyboardHook(HC_ACTION, WM_KEYDOWN, (LPARAM)&key) == 123);
+    assert(posted == before + 1 && LOWORD(postedInput) == 'W' && HIWORD(postedInput));
+    assert(keyboardHook(HC_ACTION, WM_KEYUP, (LPARAM)&key) == 123);
+    assert(!HIWORD(postedInput));
+    assert(keyboardHook(HC_ACTION, WM_SYSKEYDOWN, (LPARAM)&key) == 123);
+    assert(keyboardHook(-1, WM_KEYDOWN, 0) == 123);
+    mouse.mouseData = XBUTTON2 << 16;
+    assert(mouseHook(HC_ACTION, WM_XBUTTONDOWN, (LPARAM)&mouse) == 123);
+    assert(LOWORD(postedInput) == VK_XBUTTON2 && HIWORD(postedInput));
+    assert(mouseHook(HC_ACTION, WM_XBUTTONUP, (LPARAM)&mouse) == 123);
+    assert(!HIWORD(postedInput));
+    before = posted;
+    assert(mouseHook(HC_ACTION, WM_MOUSEWHEEL, (LPARAM)&mouse) == 123);
+    assert(posted == before && forwarded == 7);
+    puts("PASS keyboard/mouse down and up always forwarded; wheel left untouched");
+}
+int main(void) {
+    HotkeySettings settings;
+    LONG oldGeneration;
+    testActions(); testParsing(); testMatching(); testRecording();
+    failInstall = 2;
+    assert(!hotkeysOpen(recordAction, error)); assert(removals == 1 && !inputThread && !messageWindow);
+    failInstall = 0;
+    assert(hotkeysOpen(recordAction, error));
+    testPersistence(); testForwarding();
+    hotkeyDefaults(&settings); assert(hotkeysApply(&settings, NULL, error));
+    memset(matcher.physical, 0, sizeof(matcher.physical)); memset(&matcher.down, 0, sizeof(matcher.down));
+    matcher.waitForRelease = FALSE;
+    SendMessageW(messageWindow, INPUT_MESSAGE, MAKEWPARAM(VK_F7, TRUE), inputGeneration);
+    assert(dispatched[ACTION_TOGGLE_CAPTURE] == 1);
+    oldGeneration = inputGeneration;
+    hotkeysRecordBegin(recordBinding);
+    memset(matcher.physical, 0, sizeof(matcher.physical)); memset(&matcher.down, 0, sizeof(matcher.down));
+    matcher.waitForRelease = FALSE;
+    SendMessageW(messageWindow, INPUT_MESSAGE, MAKEWPARAM(VK_F7, TRUE), oldGeneration);
+    assert(!recordings && dispatched[ACTION_TOGGLE_CAPTURE] == 1);
+    SendMessageW(messageWindow, INPUT_MESSAGE, MAKEWPARAM('W', TRUE), inputGeneration);
+    SendMessageW(messageWindow, INPUT_MESSAGE, MAKEWPARAM('W', FALSE), inputGeneration);
+    assert(finishedRecordings == 1 && lastRecorded.keys['W']);
+    hotkeysRecordCancel(); hotkeysClose();
+    assert(removals == 3 && !inputThread && !messageWindow);
+    assert(hotkeysOpen(recordAction, error)); hotkeysClose(); assert(removals == 5);
+    puts("PASS partial hook failure, retry, UI dispatch, stale-event rejection, record delivery and shutdown");
     return 0;
 }

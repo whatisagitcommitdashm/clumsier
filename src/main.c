@@ -137,6 +137,8 @@ static void uiShowHotkeySettings(const HotkeySettings *settings) {
 }
 
 static int uiApplyHotkeysCb(Ihandle *ih) {
+    // The fields are a draft. Record, Clear, and Show defaults only edit them;
+    // active bindings change after the entire draft validates and saves.
     HotkeySettings proposed;
     char error[HOTKEY_ERROR_SIZE];
     int i;
@@ -167,18 +169,128 @@ static int uiDefaultHotkeysCb(Ihandle *ih) {
     return IUP_DEFAULT;
 }
 
+static Ihandle *recordDialog, *recordPreview;
+static HotkeyBinding recordedBinding;
+static BOOL recordingComplete;
+
+static int uiIgnoreRecordingKey(Ihandle *ih, int key) {
+    UNREFERENCED_PARAMETER(ih);
+    UNREFERENCED_PARAMETER(key);
+    // Keyboard input belongs to the recorder, not dialog accelerators. This
+    // affects only this application's dialog; the input hooks still forward it.
+    return IUP_IGNORE;
+}
+
+static int uiCancelRecordingCb(Ihandle *ih) {
+    UNREFERENCED_PARAMETER(ih);
+    recordingComplete = FALSE;
+    hotkeysRecordCancel();
+    IupHide(recordDialog);
+    return IUP_DEFAULT;
+}
+
+static void uiRecordingChanged(const HotkeyBinding *binding, BOOL finished) {
+    char text[HOTKEY_TEXT_SIZE];
+    hotkeyFormat(*binding, text);
+    IupStoreAttribute(recordPreview, "TITLE", text);
+    if (finished) {
+        // The matcher owns binding. Keep a copy before closing the modal loop.
+        recordedBinding = *binding;
+        recordingComplete = TRUE;
+        IupHide(recordDialog);
+    }
+}
+
+static int uiCancelRecordingMouse(Ihandle *ih, int button, int pressed, int x, int y, char *status) {
+    UNREFERENCED_PARAMETER(x); UNREFERENCED_PARAMETER(y); UNREFERENCED_PARAMETER(status);
+    // Cancel on press, before releasing this click could complete a Mouse1 binding.
+    if (button == IUP_BUTTON1 && pressed) return uiCancelRecordingCb(ih);
+    return IUP_DEFAULT;
+}
+
+static int uiRecordHotkeyCb(Ihandle *ih) {
+    int index = IupGetInt(ih, "_HOTKEY_ACTION");
+    Ihandle *cancel;
+    char text[HOTKEY_TEXT_SIZE];
+    if (!hotkeysInitialized || recordDialog) return IUP_DEFAULT;
+    recordingComplete = FALSE;
+    recordPreview = IupLabel("Release any held keys, then press your combination.");
+    IupSetAttribute(recordPreview, "WORDWRAP", "YES");
+    IupSetAttribute(recordPreview, "SIZE", "300x70");
+    cancel = IupButton("Cancel", NULL);
+    IupSetAttribute(cancel, "CANFOCUS", "NO");
+    IupSetCallback(cancel, "ACTION", uiCancelRecordingCb);
+    IupSetCallback(cancel, "BUTTON_CB", (Icallback)uiCancelRecordingMouse);
+    recordDialog = IupDialog(IupVbox(
+        IupLabel("Hold the keys / mouse buttons together, then release to finish.\n"
+                 "Escape is recordable. Click Cancel to discard."), recordPreview, cancel, NULL));
+    IupSetAttribute(recordDialog, "TITLE", "Record hotkey");
+    IupSetAttribute(recordDialog, "MARGIN", "10x10");
+    IupSetAttribute(recordDialog, "GAP", "8");
+    IupSetAttribute(recordDialog, "RESIZE", "NO");
+    IupSetAttribute(recordDialog, "MENUBOX", "NO");
+    IupSetAttributeHandle(recordDialog, "PARENTDIALOG", dialog);
+    IupSetCallback(recordDialog, "K_ANY", (Icallback)uiIgnoreRecordingKey);
+    IupSetCallback(recordDialog, "CLOSE_CB", uiCancelRecordingCb);
+    hotkeysRecordBegin(uiRecordingChanged);
+    // Popup runs a nested event loop: previews keep arriving, but the main
+    // dialog can't be edited. Hiding the recorder lets this call return.
+    IupPopup(recordDialog, IUP_CENTERPARENT, IUP_CENTERPARENT);
+    hotkeysRecordCancel();
+    IupDestroy(recordDialog);
+    recordDialog = recordPreview = NULL;
+    if (recordingComplete) {
+        hotkeyFormat(recordedBinding, text);
+        IupStoreAttribute(hotkeyInputs[index], "VALUE", text);
+        IupSetAttribute(hotkeyStatus, "TITLE", "Recorded. Choose Apply & Save to activate the edited bindings.");
+    } else IupSetAttribute(hotkeyStatus, "TITLE", "Recording canceled. Previous binding kept.");
+    return IUP_DEFAULT;
+}
+
+static int uiHotkeyFieldClick(Ihandle *ih, int button, int pressed, int x, int y, char *status) {
+    UNREFERENCED_PARAMETER(x); UNREFERENCED_PARAMETER(y); UNREFERENCED_PARAMETER(status);
+    // Let the native text control finish releasing mouse capture before opening
+    // a modal dialog, or it can keep receiving clicks meant for the recorder.
+    if (button == IUP_BUTTON1 && !pressed)
+        IupPostMessage(dialog, NULL, IupGetInt(ih, "_HOTKEY_ACTION"), 0, NULL);
+    return IUP_DEFAULT;
+}
+
+static int uiRecordRequestCb(Ihandle *ih, const char *text, int index, double number, void *data) {
+    UNREFERENCED_PARAMETER(ih); UNREFERENCED_PARAMETER(text);
+    UNREFERENCED_PARAMETER(number); UNREFERENCED_PARAMETER(data);
+    if (index >= 0 && index < ACTION_COUNT) return uiRecordHotkeyCb(hotkeyInputs[index]);
+    return IUP_DEFAULT;
+}
+
+static int uiClearHotkeyCb(Ihandle *ih) {
+    int index = IupGetInt(ih, "_HOTKEY_ACTION");
+    IupSetAttribute(hotkeyInputs[index], "VALUE", "None");
+    IupSetAttribute(hotkeyStatus, "TITLE", "Binding cleared in the editor. Choose Apply & Save to activate.");
+    return IUP_DEFAULT;
+}
+
 static Ihandle *uiCreateHotkeyPanel(void) {
     Ihandle *rows = IupVbox(NULL), *frame, *apply, *defaults;
     int i;
     for (i = 0; i < ACTION_COUNT; ++i) {
         Ihandle *label = IupLabel(actionName((AppAction)i));
+        Ihandle *record = IupButton("Record", NULL), *clear = IupButton("Clear", NULL);
         IupSetAttribute(label, "SIZE", "45x");
         hotkeyInputs[i] = IupText(NULL);
         IupSetAttribute(hotkeyInputs[i], "VISIBLECOLUMNS", "24");
-        IupSetAttribute(hotkeyInputs[i], "NC", "63");
-        IupAppend(rows, IupHbox(label, hotkeyInputs[i], NULL));
+        IupSetInt(hotkeyInputs[i], "NC", HOTKEY_TEXT_SIZE - 1);
+        IupSetAttribute(hotkeyInputs[i], "READONLY", "YES");
+        IupSetAttribute(hotkeyInputs[i], "TIP", "Click to record a keyboard or mouse combination.");
+        IupSetInt(hotkeyInputs[i], "_HOTKEY_ACTION", i);
+        IupSetInt(record, "_HOTKEY_ACTION", i);
+        IupSetInt(clear, "_HOTKEY_ACTION", i);
+        IupSetCallback(hotkeyInputs[i], "BUTTON_CB", (Icallback)uiHotkeyFieldClick);
+        IupSetCallback(record, "ACTION", uiRecordHotkeyCb);
+        IupSetCallback(clear, "ACTION", uiClearHotkeyCb);
+        IupAppend(rows, IupHbox(label, hotkeyInputs[i], record, clear, NULL));
     }
-    IupAppend(rows, IupLabel("Examples: F7, Ctrl+Alt+S, None. Letters/digits need a modifier."));
+    IupAppend(rows, IupLabel("Click a binding to record. Keys and mouse buttons also reach your game."));
     apply = IupButton("Apply & Save", NULL);
     defaults = IupButton("Show defaults", NULL);
     IupSetCallback(apply, "ACTION", uiApplyHotkeysCb);
@@ -337,6 +449,7 @@ void init(int argc, char* argv[]) {
     IupSetAttribute(dialog, "SIZE", "480x"); // add padding manually to width
     IupSetAttribute(dialog, "RESIZE", "NO");
     IupSetCallback(dialog, "SHOW_CB", (Icallback)uiOnDialogShow);
+    IupSetCallback(dialog, "POSTMESSAGE_CB", (Icallback)uiRecordRequestCb);
 
 
     // global layout settings to affect childrens
@@ -480,6 +593,8 @@ static void captureStop(void *context) {
 }
 
 static void uiPerformAction(AppAction action) {
+    // Buttons and hotkeys arrive here on the UI thread. Keep capture operations
+    // in this path so future controls get the same Start/Stop/Toggle behavior.
     char error[MSG_BUFSIZE] = {0};
     ActionTarget target = {error, captureIsRunning, captureStart, captureStop};
     BOOL active;
