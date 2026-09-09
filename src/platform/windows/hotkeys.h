@@ -1,19 +1,14 @@
 #pragma once
 #include <windows.h>
-#include "actions.h"
+#include "core/actions.h"
 
-// A binding is a set of Windows virtual keys, including mouse buttons.
-// Each slot is 0 or 1; all zeros means unassigned. Order doesn't matter.
-#define HOTKEY_KEY_COUNT 256
+#include "core/input.h"
 #define HOTKEY_TEXT_SIZE 4096
 #define HOTKEY_ERROR_SIZE 256
 
-typedef struct { BYTE keys[HOTKEY_KEY_COUNT]; } HotkeyBinding;
-typedef struct { HotkeyBinding bindings[ACTION_COUNT]; } HotkeySettings;
-
 UINT hotkeyNormalize(UINT key);
-BOOL hotkeyContains(const HotkeyBinding *set, const HotkeyBinding *subset);
-BOOL hotkeyEmpty(const HotkeyBinding *binding);
+
+
 void hotkeyDefaults(HotkeySettings *settings);
 BOOL hotkeyParse(const char *text, HotkeyBinding *binding, char *error);
 void hotkeyFormat(HotkeyBinding binding, char text[HOTKEY_TEXT_SIZE]);

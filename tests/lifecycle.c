@@ -80,7 +80,7 @@ static HANDLE testThread(LPSECURITY_ATTRIBUTES a, SIZE_T size, LPTHREAD_START_RO
 #undef CreateEvent
 #define CreateEvent testEvent
 #define CreateThread testThread
-#include "../src/divert.c"
+#include "../src/backends/windows/legacy/divert.c"
 #undef CreateThread
 #undef CreateEvent
 #undef CreateMutex

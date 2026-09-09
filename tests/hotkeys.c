@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include "hotkeys.h"
 #include "hotkey_matcher.h"
 
 // Observe forwarding without injecting input into the user's desktop.
@@ -26,7 +27,7 @@ static BOOL testRemove(HHOOK hook) { assert(hook); ++removals; return TRUE; }
 #define PostMessageW testPost
 #define SetWindowsHookExW testInstall
 #define UnhookWindowsHookEx testRemove
-#include "../src/hotkeys.c"
+#include "../src/platform/windows/hotkeys.c"
 #undef CallNextHookEx
 #undef PostMessageW
 #undef SetWindowsHookExW
@@ -35,25 +36,6 @@ static BOOL testRemove(HHOOK hook) { assert(hook); ++removals; return TRUE; }
 static char error[HOTKEY_ERROR_SIZE];
 static int dispatched[ACTION_COUNT], recordings, finishedRecordings;
 static HotkeyBinding lastRecorded;
-static int captureRunning, failStart;
-static int captureIsRunning(void *context) { (void)context; return captureRunning; }
-static int captureStart(void *context) {
-    (void)context;
-    if (failStart) return 0;
-    captureRunning = 1; return 1;
-}
-static void captureStop(void *context) { (void)context; captureRunning = 0; }
-static void testActions(void) {
-    ActionTarget target = {NULL, captureIsRunning, captureStart, captureStop};
-    assert(actionExecute(ACTION_TOGGLE_CAPTURE, &target) && captureRunning);
-    assert(actionExecute(ACTION_TOGGLE_CAPTURE, &target) && !captureRunning);
-    captureRunning = 1;
-    assert(actionExecute(ACTION_TOGGLE_CAPTURE, &target) && !captureRunning);
-    failStart = 1;
-    assert(!actionExecute(ACTION_TOGGLE_CAPTURE, &target) && !captureRunning);
-    assert(!actionExecute(ACTION_COUNT, &target));
-    puts("PASS action dispatch uses current capture state and propagates start failures");
-}
 static void recordAction(AppAction action) { ++dispatched[action]; }
 static void recordBinding(const HotkeyBinding *binding, BOOL finished) {
     ++recordings; finishedRecordings += finished;
@@ -99,6 +81,7 @@ static void testParsing(void) {
 }
 static void testMatching(void) {
     HotkeyMatcher state = {0};
+    state.normalize = hotkeyNormalize;
     HotkeySettings settings = {0};
     settings.bindings[0] = parse("Q+E");
     settings.bindings[1] = parse("Ctrl+Mouse4");
@@ -127,6 +110,7 @@ static void testMatching(void) {
 }
 static void testRecording(void) {
     HotkeyMatcher state = {0};
+    state.normalize = hotkeyNormalize;
     HotkeySettings settings = {0};
     settings.bindings[0] = parse("Q"); hotkeyMatcherApply(&state, &settings);
     hotkeyMatcherInput(&state, VK_LBUTTON, TRUE);
@@ -204,7 +188,7 @@ static void testForwarding(void) {
 int main(void) {
     HotkeySettings settings;
     LONG oldGeneration;
-    testActions(); testParsing(); testMatching(); testRecording();
+    testParsing(); testMatching(); testRecording();
     failInstall = 2;
     assert(!hotkeysOpen(recordAction, error)); assert(removals == 1 && !inputThread && !messageWindow);
     failInstall = 0;

@@ -6,7 +6,9 @@
 #include <conio.h>
 #include "iup.h"
 #include "common.h"
-#include "actions.h"
+#include "core/controller.h"
+#include "backends/windows/backend.h"
+#include "lag_controls.h"
 #include "hotkeys.h"
 
 // ! the order decides which module get processed first
@@ -36,6 +38,7 @@ static Ihandle *hotkeyInputs[ACTION_COUNT], *hotkeyStatus;
 static HotkeySettings hotkeySettings;
 static wchar_t hotkeyPath[MAX_PATH];
 static BOOL hotkeysInitialized;
+static AppController application;
 
 void showStatus(const char *line);
 static int uiOnDialogShow(Ihandle *ih, int state);
@@ -339,6 +342,9 @@ void init(int argc, char* argv[]) {
     Ihandle *noneIcon, *doingIcon, *errorIcon;
     char* arg_value = NULL;
 
+    controllerInit(&application, windowsNetworkBackend());
+    lagUIUseController(&application);
+
     // fill in config
     loadConfig();
 
@@ -489,7 +495,7 @@ void startup() {
 
 void cleanup() {
     hotkeysClose();
-    divertStop();
+    controllerShutdown(&application);
     IupDestroy(timer);
     if (timeout) {
         IupDestroy(timeout);
@@ -578,32 +584,30 @@ static int uiOnDialogShow(Ihandle *ih, int state) {
     return exit ? IUP_CLOSE : IUP_DEFAULT;
 }
 
-static int captureIsRunning(void *context) {
-    UNREFERENCED_PARAMETER(context);
-    return divertIsRunning();
-}
-
-static int captureStart(void *context) {
-    return divertStart(IupGetAttribute(filterText, "VALUE"), (char*)context);
-}
-
-static void captureStop(void *context) {
-    UNREFERENCED_PARAMETER(context);
-    divertStop();
-}
-
 static void uiPerformAction(AppAction action) {
     // Buttons and hotkeys arrive here on the UI thread. Keep capture operations
     // in this path so future controls get the same Start/Stop/Toggle behavior.
     char error[MSG_BUFSIZE] = {0};
-    ActionTarget target = {error, captureIsRunning, captureStart, captureStop};
+    CaptureTarget target = {0};
+    // The inherited text box is explicitly a Windows-native filter. Portable
+    // presets will use target.traffic instead of borrowing this syntax.
+    if (!controllerIsRunning(&application) && action != ACTION_STOP_CAPTURE) {
+        const char *filter = IupGetAttribute(filterText, "VALUE");
+        if (!filter || !*filter || strlen(filter) >= sizeof(target.native_filter)) {
+            showStatus("Enter a Windows filter shorter than 1024 characters.");
+            return;
+        }
+        strcpy(target.native_backend, "windivert");
+        strcpy(target.native_filter, filter);
+        if (!controllerSetTarget(&application, &target, error)) { showStatus(error); return; }
+    }
     BOOL active;
     int i;
-    if (!actionExecute(action, &target)) {
+    if (!controllerExecute(&application, action, error)) {
         showStatus(error);
         return;
     }
-    active = divertIsRunning();
+    active = controllerIsRunning(&application);
     IupSetAttribute(filterText, "ACTIVE", active ? "NO" : "YES");
     IupSetAttribute(filterButton, "TITLE", active ? "Stop" : "Start");
     IupSetAttribute(timer, "RUN", active ? "YES" : "NO");
@@ -721,6 +725,8 @@ static void uiSetupModule(Module *module, Ihandle *parent) {
     IupSetAttribute(icon, "IMAGE", "none_icon");
     IupSetAttribute(icon, "PADDING", "4x");
     module->iconHandle = icon;
+
+    if (module == &lagModule) lagUIBindToggle(toggle, controls);
 
     // parameterize toggle
     if (parameterized) {

@@ -294,6 +294,3 @@ int32_t crate_stats_calculate(CRateStats *rate, uint32_t now_ts)
 
 	return (int32_t)r;
 }
-
-
-

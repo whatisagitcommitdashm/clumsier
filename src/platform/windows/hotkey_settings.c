@@ -5,6 +5,16 @@
 #include "hotkeys.h"
 #include <shlobj.h>
 
+UINT hotkeyNormalize(UINT key) {
+    switch (key) {
+        case VK_LCONTROL: case VK_RCONTROL: return VK_CONTROL;
+        case VK_LSHIFT: case VK_RSHIFT: return VK_SHIFT;
+        case VK_LMENU: case VK_RMENU: return VK_MENU;
+        case VK_RWIN: return VK_LWIN;
+        default: return key;
+    }
+}
+
 // These names are also the file format. Renaming one needs a parser alias for
 // existing files. Punctuation uses US key names, not the character a particular
 // keyboard layout would type; we're saving virtual keys, not text input.

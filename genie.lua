@@ -37,6 +37,7 @@ solution('clumsy')
     project('clumsy')
         language("C")
         files({'src/**.c', 'src/**.h'})
+        includedirs({'src', 'src/core', 'src/platform/windows', 'src/backends/windows/legacy'})
         links({'WinDivert', 'iup', 'user32', 'shell32', 'comctl32', 'Winmm', 'ws2_32'})
         if string.match(_ACTION, '^vs') then -- only vs can include rc file in solution
             files({'./etc/clumsy.rc'})

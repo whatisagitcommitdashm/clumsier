@@ -21,11 +21,11 @@ if /i not "%VSCMD_ARG_TGT_ARCH%"=="x64" (
 echo Building action and hotkey tests for x64.
 cd /d "%~dp0.."
 if not exist build\tests mkdir build\tests
-cl /nologo /Zi /Od /MDd /W3 /D_CRT_SECURE_NO_WARNINGS /Isrc /Fobuild\tests\ /Fdbuild\tests\hotkeys-compiler.pdb /Febuild\tests\hotkeys.exe tests\hotkeys.c src\actions.c src\hotkey_settings.c src\hotkey_matcher.c /link /DEBUG /MACHINE:X64 user32.lib shell32.lib
+cl /nologo /Zi /Od /MDd /W3 /D_CRT_SECURE_NO_WARNINGS /Isrc /Isrc\core /Isrc\platform\windows /Isrc\backends\windows\legacy /Fobuild\tests\ /Fdbuild\tests\hotkeys-compiler.pdb /Febuild\tests\hotkeys.exe tests\hotkeys.c src\core\actions.c src\platform\windows\hotkey_settings.c src\core\hotkey_matcher.c /link /DEBUG /MACHINE:X64 user32.lib shell32.lib
 if errorlevel 1 exit /b 1
 build\tests\hotkeys.exe
 if errorlevel 1 exit /b 1
-cl /nologo /Zi /Od /MDd /W3 /D_CRT_SECURE_NO_WARNINGS /Isrc /Fobuild\tests\ /Fdbuild\tests\listener-compiler.pdb /Febuild\tests\hotkey-listener.exe tests\hotkey_listener.c src\hotkeys.c src\actions.c src\hotkey_settings.c src\hotkey_matcher.c /link /DEBUG /MACHINE:X64 user32.lib shell32.lib
+cl /nologo /Zi /Od /MDd /W3 /D_CRT_SECURE_NO_WARNINGS /Isrc /Isrc\core /Isrc\platform\windows /Isrc\backends\windows\legacy /Fobuild\tests\ /Fdbuild\tests\listener-compiler.pdb /Febuild\tests\hotkey-listener.exe tests\hotkey_listener.c src\platform\windows\hotkeys.c src\core\actions.c src\platform\windows\hotkey_settings.c src\core\hotkey_matcher.c /link /DEBUG /MACHINE:X64 user32.lib shell32.lib
 if errorlevel 1 exit /b 1
 build\tests\hotkey-listener.exe
 exit /b %errorlevel%

@@ -37,7 +37,22 @@ Settings remain in `%LOCALAPPDATA%\Clumsier\hotkeys.ini`. Existing version-1 set
 
 See [repository setup](docs/REPOSITORY-SETUP.md), [build status](docs/BUILDING.md), and [roadmap](docs/ROADMAP.md).
 
-Run `scripts\test-lifecycle.cmd` and `scripts\test-hotkeys.cmd` to check capture lifecycle behavior and hotkey actions, parsing, persistence, and rebinding. These scripts use the Visual Studio C++ Build Tools. Also test shortcuts while the target game is focused, including holding a key and switching between Start, Stop, and Toggle.
+Run `scripts\test-core.cmd`, `scripts\test-lifecycle.cmd`, and `scripts\test-hotkeys.cmd` to check capture lifecycle behavior and hotkey actions, parsing, persistence, and rebinding. These scripts use the Visual Studio C++ Build Tools. Also test shortcuts while the target game is focused, including holding a key and switching between Start, Stop, and Toggle.
+
+## Source layout
+
+- `src/core/`: plain C settings, action identifiers, application controller, and input matching. No Windows or IUP headers.
+- `src/backends/windows/`: the WinDivert adapter, structured traffic-filter translation, and Lag queue. `legacy/` contains the inherited packet machinery and remaining Windows-only effects, including their older UI coupling.
+- `src/platform/windows/`: global input listening, Windows key names/settings files, and elevation.
+- `src/ui/`: the IUP application and Lag controls. The current Lag knob still edits both direction delays together; the model/backend support independent values.
+
+The controller owns accepted Lag settings and queries the backend for running state. Failed live updates leave accepted settings unchanged. Backends implement start, stop, and applying Lag conditions; the shared interface does not expose WinDivert packets or handles. Settings can select traffic structurally or explicitly name a native filter backend. The existing filter editor uses the `windivert` native filter option.
+
+**Changing the active Lag configuration immediately changes the rules governing packets that Clumsier is already holding.** Held packets retain their original enqueue times: lowering the delay can release them sooner, and raising it can hold them longer. Their waiting time does not restart when settings change. This makes live changes control the current queue as well as newly arriving packets.
+
+Here, "immediately" means the new rules apply on the next processing pass, not that the settings call synchronously delivers packets. Disabling Lag or a direction releases the affected queued packets on processing; Stop flushes the queue. Traffic selection changes still require stopping capture first. Failed updates leave the previous rules in effect. The Windows queue retains its inherited overload limit. Other backends will need to document their scheduling precision and overload behavior.
+
+This is an operational Windows application with a portable core, not a Linux/macOS release. Windows input IDs and file serialization stay in the Windows adapter; a future platform must supply its own key mapping and storage integration. The remaining legacy UI coupling is intentionally isolated rather than generalized into the portable API.
 
 ## License
 

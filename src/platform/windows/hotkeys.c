@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "hotkey_matcher.h"
+#include "hotkeys.h"
 
 #define INPUT_MESSAGE (WM_APP + 1)
 
@@ -113,6 +114,7 @@ static void synchronizeInput(void) {
     UINT key;
     // A queued press from before Apply or Record must not take on a new meaning.
     // Bump the generation to discard those messages, then sample what's held.
+    matcher.normalize = hotkeyNormalize;
     InterlockedIncrement(&inputGeneration);
     memset(matcher.physical, 0, sizeof(matcher.physical));
     memset(&matcher.down, 0, sizeof(matcher.down));
