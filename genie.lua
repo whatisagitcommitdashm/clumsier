@@ -36,7 +36,14 @@ solution('clumsy')
 
     project('clumsy')
         language("C")
-        files({'src/**.c', 'src/**.h', 'external/cjson/cJSON.c', 'external/cjson/cJSON.h'})
+        -- This builds the Windows app. Other backends have their own build scripts.
+        files({
+            'src/core/**.c', 'src/core/**.h',
+            'src/ui/**.c', 'src/ui/**.h',
+            'src/platform/windows/**.c', 'src/platform/windows/**.h',
+            'src/backends/windows/**.c', 'src/backends/windows/**.h',
+            'external/cjson/cJSON.c', 'external/cjson/cJSON.h'
+        })
         defines({'CJSON_NESTING_LIMIT=32'})
         includedirs({'src', 'src/core', 'src/platform/windows', 'src/backends/windows/legacy'})
         links({'WinDivert', 'iup', 'user32', 'shell32', 'comctl32', 'Winmm', 'ws2_32', 'ole32', 'uuid'})
