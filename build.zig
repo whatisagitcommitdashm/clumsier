@@ -111,12 +111,18 @@ pub fn build(b: *std.build.Builder) void {
     exe.addCSourceFile("src/backends/windows/legacy/utils.c", &.{""});
     exe.addCSourceFile("src/core/actions.c", &.{""});
     exe.addCSourceFile("src/core/controller.c", &.{""});
+    exe.addCSourceFile("src/core/preset.c", &.{""});
+    exe.addCSourceFile("src/core/preset_json.c", &.{""});
+    exe.addCSourceFile("external/cjson/cJSON.c", &.{"-DCJSON_NESTING_LIMIT=32"});
     exe.addCSourceFile("src/core/network.c", &.{""});
     exe.addCSourceFile("src/core/hotkey_matcher.c", &.{""});
     exe.addCSourceFile("src/platform/windows/hotkey_settings.c", &.{""});
     exe.addCSourceFile("src/platform/windows/hotkeys.c", &.{""});
     exe.addCSourceFile("src/ui/lag_controls.c", &.{""});
     exe.addCSourceFile("src/ui/main.c", &.{""});
+    exe.addCSourceFile("src/ui/preset_editor.c", &.{""});
+    exe.addCSourceFile("src/ui/sequence_controls.c", &.{""});
+    exe.addCSourceFile("src/platform/windows/preset_store.c", &.{""});
     exe.addIncludeDir("src");
     exe.addIncludeDir("src/core");
     exe.addIncludeDir("src/platform/windows");

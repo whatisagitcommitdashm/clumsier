@@ -14,7 +14,7 @@ BOOL hotkeyParse(const char *text, HotkeyBinding *binding, char *error);
 void hotkeyFormat(HotkeyBinding binding, char text[HOTKEY_TEXT_SIZE]);
 BOOL hotkeyValidate(const HotkeySettings *settings, char *error);
 BOOL hotkeySettingsPath(wchar_t path[MAX_PATH], char *error);
-// Both version 1 and version 2 files load. Saving writes version 2 atomically.
+// Versions 1 and 2 still load. Saving writes version 3 atomically.
 BOOL hotkeyLoad(const wchar_t *path, HotkeySettings *settings, char *error);
 BOOL hotkeySave(const wchar_t *path, const HotkeySettings *settings, char *error);
 
@@ -31,3 +31,6 @@ BOOL hotkeysApply(const HotkeySettings *settings, const wchar_t *path, char *err
 void hotkeysRecordBegin(HotkeyRecordCallback callback);
 void hotkeysRecordCancel(void);
 void hotkeysClose(void);
+// Nestable, UI-thread only. Editors pause actions, not input to other apps.
+void hotkeysPause(void);
+void hotkeysResume(void);

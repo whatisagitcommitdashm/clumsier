@@ -1,0 +1,23 @@
+{
+  "format_version": 1,
+  "name": "Four leaps",
+  "description": "Example for remote inbound traffic. Adjust the traffic selection for your server.",
+  "effect": "lag",
+  "mode": "target_ping",
+  "policy": "inbound",
+  "loop": false,
+  "traffic": {
+    "protocol": "any",
+    "direction": "inbound",
+    "remote_address": "",
+    "remote_port": 0,
+    "native_backend": "",
+    "native_filter": ""
+  },
+  "steps": [
+    { "name": "Leap 1", "note": "", "type": "target", "target_ms": 200 },
+    { "name": "Leap 2", "note": "Use the connection's lowest available ping.", "type": "lowest" },
+    { "name": "Leap 3", "note": "", "type": "target", "target_ms": 150 },
+    { "name": "Leap 4", "note": "", "type": "target", "target_ms": 100 }
+  ]
+}

@@ -72,6 +72,11 @@ int main(void) {
     now = 0xfffffff0; packet(FALSE); windowsLagProcess(head, tail);
     now = 5; windowsLagProcess(head, tail); assert(drain() == 1);
     now = 100; packet(FALSE); windowsLagProcess(head, tail);
+    // Zero delay bypasses new packets and releases held packets on the same
+    // clock tick. The other direction can still have a nonzero delay.
+    lag.inbound_ms = 0; windowsLagConfigure(&lag);
+    packet(FALSE); windowsLagProcess(head, tail); assert(drain() == 2 && !bufSize);
+    packet(FALSE); packet(TRUE); windowsLagProcess(head, tail); assert(drain() == 1 && bufSize == 1);
     windowsLagStop(head, tail); assert(drain() == 1 && !bufSize && !timerUsers);
     puts("PASS Windows Lag: independent directions, live edits, direction disable, timer wrap and stop flush");
     return 0;

@@ -15,6 +15,7 @@ static volatile LONG inputGeneration;
 static HotkeyMatcher matcher;
 static HotkeyActionCallback actionCallback;
 static HotkeyRecordCallback recordCallback;
+static unsigned int pauseDepth;
 
 // The listener never runs application actions or touches IUP. Always forwarding
 // the original event lets other active apps receive both presses and releases normally.
@@ -90,7 +91,7 @@ static void deliverInput(UINT key, BOOL down) {
         callback(&matcher.recorded, !matcher.recording);
     }
     for (i = 0; i < ACTION_COUNT; ++i)
-        if (actions & (1u << i)) actionCallback((AppAction)i);
+        if (!pauseDepth && actionCallback && (actions & (1u << i))) actionCallback((AppAction)i);
 }
 
 static LRESULT CALLBACK hotkeyWindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -160,6 +161,17 @@ failed:
     hotkeysClose();
     sprintf(error, "Cannot initialize global input (Windows error %lu).", reason);
     return FALSE;
+}
+
+void hotkeysPause(void) {
+    ++pauseDepth;
+    synchronizeInput();
+}
+
+void hotkeysResume(void) {
+    if (pauseDepth) --pauseDepth;
+    // Keys held when an editor closes must be released before they can fire.
+    synchronizeInput();
 }
 
 BOOL hotkeysApply(const HotkeySettings *settings, const wchar_t *path, char *error) {

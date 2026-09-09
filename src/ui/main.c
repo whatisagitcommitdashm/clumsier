@@ -10,6 +10,7 @@
 #include "backends/windows/backend.h"
 #include "lag_controls.h"
 #include "hotkeys.h"
+#include "sequence_controls.h"
 
 // ! the order decides which module get processed first
 Module* modules[MODULE_CNT] = {
@@ -39,11 +40,27 @@ static HotkeySettings hotkeySettings;
 static wchar_t hotkeyPath[MAX_PATH];
 static BOOL hotkeysInitialized;
 static AppController application;
+static bool advancedMode;
+static Ihandle *viewTabs, *simpleCapture, *simpleStart;
 
 void showStatus(const char *line);
 static int uiOnDialogShow(Ihandle *ih, int state);
 static int uiToggleCaptureCb(Ihandle *ih);
 static void uiPerformAction(AppAction action);
+static void uiConfigurationChanged(void);
+static int uiAdvancedChanged(Ihandle *ih, int state);
+static int uiUseQuickControls(Ihandle *ih);
+
+static void uiShowDirections(Ihandle *control, bool visible) {
+    Ihandle *child;
+    const char *title = IupGetAttribute(control, "TITLE");
+    if (!strcmp(IupGetClassName(control), "toggle") && title &&
+        (!strcmp(title, "Inbound") || !strcmp(title, "Outbound"))) {
+        IupSetAttribute(control, "FLOATING", visible ? "NO" : "YES");
+        IupSetAttribute(control, "VISIBLE", visible ? "YES" : "NO");
+    }
+    for (child = IupGetChild(control, 0); child; child = IupGetBrother(child)) uiShowDirections(child, visible);
+}
 static int uiStartCb(Ihandle *ih);
 static int uiTimerCb(Ihandle *ih);
 static int uiTimeoutCb(Ihandle *ih);
@@ -279,7 +296,7 @@ static Ihandle *uiCreateHotkeyPanel(void) {
     for (i = 0; i < ACTION_COUNT; ++i) {
         Ihandle *label = IupLabel(actionName((AppAction)i));
         Ihandle *record = IupButton("Record", NULL), *clear = IupButton("Clear", NULL);
-        IupSetAttribute(label, "SIZE", "45x");
+        IupSetAttribute(label, "SIZE", "75x");
         hotkeyInputs[i] = IupText(NULL);
         IupSetAttribute(hotkeyInputs[i], "VISIBLECOLUMNS", "24");
         IupSetInt(hotkeyInputs[i], "NC", HOTKEY_TEXT_SIZE - 1);
@@ -302,7 +319,7 @@ static Ihandle *uiCreateHotkeyPanel(void) {
     hotkeyStatus = IupLabel("Hotkeys are not active yet.");
     IupSetAttribute(hotkeyStatus, "WORDWRAP", "YES");
     IupSetAttribute(hotkeyStatus, "EXPAND", "HORIZONTAL");
-    IupSetAttribute(hotkeyStatus, "SIZE", "300x48");
+    IupSetAttribute(hotkeyStatus, "SIZE", "0x48");
     IupAppend(rows, hotkeyStatus);
     IupSetAttribute(rows, "MARGIN", "4x4");
     IupSetAttribute(rows, "GAP", "4");
@@ -338,7 +355,7 @@ static void uiInitializeHotkeys(void) {
 
 void init(int argc, char* argv[]) {
     UINT ix;
-    Ihandle *topVbox, *bottomVbox, *dialogVBox, *controlHbox;
+    Ihandle *topVbox, *bottomVbox, *dialogVBox, *controlHbox, *tabs, *sequences, *hotkeyPanel;
     Ihandle *noneIcon, *doingIcon, *errorIcon;
     char* arg_value = NULL;
 
@@ -350,12 +367,15 @@ void init(int argc, char* argv[]) {
 
     // iup inits
     IupOpen(&argc, &argv);
+    IupSetGlobal("UTF8MODE", "YES");
+    IupSetGlobal("UTF8MODE_FILE", "YES");
 
     // this is so easy to get wrong so it's pretty worth noting in the program
     statusLabel = IupLabel("NOTICE: When capturing localhost (loopback) packets, you CAN'T include inbound criteria.\n"
         "Filters like 'udp' need to be 'udp and outbound' to work. See readme for more info.");
     IupSetAttribute(statusLabel, "EXPAND", "HORIZONTAL");
     IupSetAttribute(statusLabel, "PADDING", "8x8");
+    IupSetAttributes(statusLabel, "WORDWRAP=YES, SIZE=0x38");
 
     topFrame = IupFrame(
         topVbox = IupVbox(
@@ -364,7 +384,7 @@ void init(int argc, char* argv[]) {
                 stateIcon = IupLabel(NULL),
                 filterButton = IupButton("Start", NULL),
                 IupFill(),
-                IupLabel("Presets:  "),
+                IupLabel("Traffic filters:  "),
                 filterSelectList = IupList(NULL),
                 NULL
             ),
@@ -409,7 +429,8 @@ void init(int argc, char* argv[]) {
     IupSetAttribute(filterSelectList, "VALUE", "1");
     IupSetCallback(filterSelectList, "ACTION", (Icallback)uiListSelectCb);
     // set filter text value since the callback won't take effect before main loop starts
-    IupSetAttribute(filterText, "VALUE", filters[0].filterValue);
+    IupSetAttribute(filterText, "VALUE", parameterized ? filters[0].filterValue : "inbound");
+    if (!parameterized) IupSetInt(filterSelectList, "VALUE", 0);
 
     // functionalities frame 
     bottomFrame = IupFrame(
@@ -440,22 +461,53 @@ void init(int argc, char* argv[]) {
         uiSetupModule(*(modules+ix), bottomVbox);
     }
 
-    // dialog
-    dialog = IupDialog(
+    sequences = sequenceUICreate(&application, uiPerformAction, uiConfigurationChanged);
+    hotkeyPanel = uiCreateHotkeyPanel();
+    IupSetAttribute(hotkeyPanel, "TABTITLE", "Hotkeys");
+    {
+        Ihandle *useQuick = IupButton("Use quick controls", NULL);
+        Ihandle *help = IupLabel("Turn an effect on, set its amount, then Start. No sequence is needed.\nIf a sequence is active, choose Use quick controls to take over its current settings.");
+        Ihandle *quick;
+        IupSetAttributes(help, "WORDWRAP=YES, EXPAND=HORIZONTAL, SIZE=0x40");
+        IupSetCallback(useQuick, "ACTION", uiUseQuickControls);
+        quick = IupVbox(help, useQuick, bottomFrame, NULL);
+        IupSetAttributes(quick, "TABTITLE=Quick controls, MARGIN=5x5, GAP=6, EXPAND=HORIZONTAL");
+        tabs = IupTabs(quick, sequences, hotkeyPanel, NULL);
+    }
+    viewTabs = tabs;
+    IupSetAttribute(tabs, "EXPAND", "HORIZONTAL");
+    simpleStart = IupButton("Start", NULL);
+    IupSetCallback(simpleStart, "ACTION", uiToggleCaptureCb);
+    simpleCapture = IupHbox(simpleStart, IupLabel("Start / Stop also works with your hotkeys."), NULL);
+    {
+        Ihandle *advanced = IupToggle("Advanced mode", NULL);
+        IupSetCallback(advanced, "ACTION", (Icallback)uiAdvancedChanged);
+        IupSetHandle("clumsier_advanced_mode", advanced);
+    }
+    // Keep the active step visible even when viewing another tab.
+    dialog = IupDialog(IupScrollBox(
         dialogVBox = IupVbox(
+            IupHbox(IupLabel("Clumsier"), IupFill(), IupGetHandle("clumsier_advanced_mode"), NULL),
+            simpleCapture,
             topFrame,
-            bottomFrame,
-            uiCreateHotkeyPanel(),
+            sequenceUIStatus(),
+            tabs,
             statusLabel,
             NULL
         )
-    );
+    ));
+    IupSetAttribute(IupGetChild(dialog, 0), "EXPAND", "YES");
+    IupSetAttribute(dialogVBox, "EXPAND", "YES");
 
     IupSetAttribute(dialog, "TITLE", "clumsy " CLUMSY_VERSION);
-    IupSetAttribute(dialog, "SIZE", "480x"); // add padding manually to width
-    IupSetAttribute(dialog, "RESIZE", "NO");
+    IupSetAttribute(dialog, "SIZE", "530x");
+    IupSetAttribute(dialog, "RESIZE", "YES");
+    IupSetAttribute(dialog, "SHRINK", "YES");
     IupSetCallback(dialog, "SHOW_CB", (Icallback)uiOnDialogShow);
     IupSetCallback(dialog, "POSTMESSAGE_CB", (Icallback)uiRecordRequestCb);
+    // Command-line users intentionally requested the inherited manual controls.
+    uiAdvancedChanged(IupGetHandle("clumsier_advanced_mode"), parameterized != 0);
+    showStatus("Quick controls are ready. Start uses incoming traffic by default; Advanced mode lets you change it.");
 
 
     // global layout settings to affect childrens
@@ -573,7 +625,7 @@ static int uiOnDialogShow(Ihandle *ih, int state) {
     // try elevate and decides whether to exit
     exit = tryElevate(hWnd, parameterized);
 
-    if (!exit) uiInitializeHotkeys();
+    if (!exit) { uiInitializeHotkeys(); sequenceUIInitialize(); }
 
     if (!exit && parameterized) {
         setFromParameter(filterText, "VALUE", "filter");
@@ -591,7 +643,8 @@ static void uiPerformAction(AppAction action) {
     CaptureTarget target = {0};
     // The inherited text box is explicitly a Windows-native filter. Portable
     // presets will use target.traffic instead of borrowing this syntax.
-    if (!controllerIsRunning(&application) && action != ACTION_STOP_CAPTURE) {
+    if (!controllerIsRunning(&application) && !application.preset_loaded &&
+        (action == ACTION_START_CAPTURE || action == ACTION_TOGGLE_CAPTURE)) {
         const char *filter = IupGetAttribute(filterText, "VALUE");
         if (!filter || !*filter || strlen(filter) >= sizeof(target.native_filter)) {
             showStatus("Enter a Windows filter shorter than 1024 characters.");
@@ -608,8 +661,9 @@ static void uiPerformAction(AppAction action) {
         return;
     }
     active = controllerIsRunning(&application);
-    IupSetAttribute(filterText, "ACTIVE", active ? "NO" : "YES");
+    uiConfigurationChanged();
     IupSetAttribute(filterButton, "TITLE", active ? "Stop" : "Start");
+    IupSetAttribute(simpleStart, "TITLE", active ? "Stop" : "Start");
     IupSetAttribute(timer, "RUN", active ? "YES" : "NO");
     if (!active) {
         for (i = 0; i < MODULE_CNT; ++i) {
@@ -619,7 +673,45 @@ static void uiPerformAction(AppAction action) {
         sendState = SEND_STATUS_NONE;
         IupSetAttribute(stateIcon, "IMAGE", "none_icon");
     }
-    showStatus(active ? "Started filtering. Enable functions to take effect." : "Stopped.");
+    showStatus(active ? "Capture running." : "Capture stopped.");
+}
+
+static int uiAdvancedChanged(Ihandle *ih, int state) {
+    advancedMode = state != 0;
+    IupSetInt(ih, "VALUE", state);
+    IupSetAttribute(topFrame, "FLOATING", advancedMode ? "NO" : "YES");
+    IupSetAttribute(topFrame, "VISIBLE", advancedMode ? "YES" : "NO");
+    IupSetAttribute(simpleCapture, "FLOATING", advancedMode ? "YES" : "NO");
+    IupSetAttribute(simpleCapture, "VISIBLE", advancedMode ? "NO" : "YES");
+    uiShowDirections(bottomFrame, advancedMode);
+    sequenceUISetAdvanced(advancedMode);
+    if (dialog) IupRefresh(dialog);
+    return IUP_DEFAULT;
+}
+
+static int uiUseQuickControls(Ihandle *ih) {
+    UNREFERENCED_PARAMETER(ih);
+    // Taking over is explicit. Merely looking at another tab never unloads a
+    // sequence, changes traffic selection, or starts/stops capture.
+    controllerUnloadPreset(&application);
+    uiConfigurationChanged();
+    showStatus("Quick controls now own the current settings. Capture state and delay are unchanged.");
+    return IUP_DEFAULT;
+}
+
+static void uiConfigurationChanged(void) {
+    bool editable = !application.preset_loaded && !controllerIsRunning(&application);
+    char filter[NATIVE_FILTER_SIZE], error[NETWORK_ERROR_SIZE];
+    if (application.target.native_filter[0] || application.preset_loaded) {
+        if (windowsBuildFilter(&application.target, filter, error)) IupStoreAttribute(filterText, "VALUE", filter);
+    }
+    IupSetAttribute(filterText, "ACTIVE", editable ? "YES" : "NO");
+    IupSetAttribute(filterSelectList, "ACTIVE", editable ? "YES" : "NO");
+    lagUIRefresh();
+    // A loaded v1 preset owns Lag and excludes the other effects. Unload makes
+    // manual editing available again without changing the accepted settings.
+    IupSetAttribute(bottomFrame, "ACTIVE", application.preset_loaded ? "NO" : "YES");
+    sequenceUIRefresh();
 }
 
 static int uiStartCb(Ihandle *ih) {

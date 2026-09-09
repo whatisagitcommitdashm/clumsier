@@ -18,16 +18,18 @@ The application requests elevation when launched because WinDivert needs adminis
 .\scripts\test-core.cmd
 .\scripts\test-lifecycle.cmd
 .\scripts\test-hotkeys.cmd
+.\scripts\test-presets.cmd
 ```
 
 - `test-core` compiles the shared core without Windows or IUP headers, tests the controller with a fake backend, and tests the Windows filter translator and Lag queue without intercepting network traffic.
 - `test-lifecycle` exercises the existing capture workers with a simulated WinDivert driver.
 - `test-hotkeys` checks matching, recording, persistence, forwarding, and actual listener startup/shutdown. It does not inject keyboard input or start packet capture.
+- `test-presets` checks target calculations, sequence transitions, JSON validation, Windows library persistence, and real IUP editor callbacks without opening windows or capturing traffic. Test files live in temporary folders, not your library.
 
 The core tests can also be compiled with a standard C11 compiler, independently of the Windows application:
 
 ```text
-cc -std=c11 -Wall -Wextra -Werror -pedantic -Isrc tests/core.c src/core/actions.c src/core/controller.c src/core/network.c src/core/hotkey_matcher.c -o core-tests
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Isrc tests/core.c src/core/actions.c src/core/controller.c src/core/network.c src/core/hotkey_matcher.c src/core/preset.c src/core/preset_json.c external/cjson/cJSON.c -DCJSON_NESTING_LIMIT=32 -o core-tests
 ```
 
 The core has been checked with MSVC and the locally installed MinGW GCC. This is not a Linux or macOS backend test; neither backend exists yet.
@@ -39,3 +41,5 @@ The core has been checked with MSVC and the locally installed MinGW GCC. This is
 ## Manual regression checks
 
 After a successful build, check Start/Stop/Toggle, recording and saved hotkeys, Lag enable/disable, direction selection, and editing delay while capture runs. Confirm Stop restores normal traffic, including after a high-delay setting. Check another inherited effect as well. Automated tests do not establish actual in-game timing or GUI correctness.
+
+For the new preset workflow, use the focused [manual and design checks](PRESETS.md#manual-acceptance-checks). The build also copies cJSON's license beside the executable.

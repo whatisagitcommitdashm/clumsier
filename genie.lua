@@ -36,9 +36,10 @@ solution('clumsy')
 
     project('clumsy')
         language("C")
-        files({'src/**.c', 'src/**.h'})
+        files({'src/**.c', 'src/**.h', 'external/cjson/cJSON.c', 'external/cjson/cJSON.h'})
+        defines({'CJSON_NESTING_LIMIT=32'})
         includedirs({'src', 'src/core', 'src/platform/windows', 'src/backends/windows/legacy'})
-        links({'WinDivert', 'iup', 'user32', 'shell32', 'comctl32', 'Winmm', 'ws2_32'})
+        links({'WinDivert', 'iup', 'user32', 'shell32', 'comctl32', 'Winmm', 'ws2_32', 'ole32', 'uuid'})
         if string.match(_ACTION, '^vs') then -- only vs can include rc file in solution
             files({'./etc/clumsy.rc'})
         elseif _ACTION == MINGW_ACTION then

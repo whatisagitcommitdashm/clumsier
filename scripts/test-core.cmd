@@ -20,11 +20,11 @@ if /i not "%VSCMD_ARG_TGT_ARCH%"=="x64" (
 )
 cd /d "%~dp0.."
 if not exist build\tests mkdir build\tests
-cl /nologo /std:c11 /W4 /WX /D_CRT_SECURE_NO_WARNINGS /Isrc /Fobuild\tests\ /Febuild\tests\core.exe tests\core.c src\core\*.c
+cl /nologo /std:c11 /W4 /WX /D_CRT_SECURE_NO_WARNINGS /DCJSON_NESTING_LIMIT=32 /Isrc /Fobuild\tests\ /Febuild\tests\core.exe tests\core.c src\core\*.c external\cjson\cJSON.c
 if errorlevel 1 exit /b 1
 build\tests\core.exe
 if errorlevel 1 exit /b 1
-cl /nologo /std:c11 /W3 /D_CRT_SECURE_NO_WARNINGS /Isrc /Isrc\backends\windows\legacy /Iexternal\iup-3.30_Win64_dll16_lib\include /Iexternal\WinDivert-2.2.0-A\include /Fobuild\tests\ /Febuild\tests\windows-backend.exe tests\windows_backend.c src\backends\windows\backend.c src\backends\windows\legacy\packet.c src\core\network.c /link /LIBPATH:external\WinDivert-2.2.0-A\x64 WinDivert.lib ws2_32.lib
+cl /nologo /std:c11 /W3 /D_CRT_SECURE_NO_WARNINGS /DCJSON_NESTING_LIMIT=32 /Isrc /Isrc\backends\windows\legacy /Iexternal\iup-3.30_Win64_dll16_lib\include /Iexternal\WinDivert-2.2.0-A\include /Fobuild\tests\ /Febuild\tests\windows-backend.exe tests\windows_backend.c src\backends\windows\backend.c src\backends\windows\legacy\packet.c src\core\network.c /link /LIBPATH:external\WinDivert-2.2.0-A\x64 WinDivert.lib ws2_32.lib
 if errorlevel 1 exit /b 1
 copy /y external\WinDivert-2.2.0-A\x64\WinDivert.dll build\tests\ >nul
 if errorlevel 1 exit /b 1

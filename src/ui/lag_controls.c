@@ -4,6 +4,7 @@
 
 static AppController *app;
 static Ihandle *inboundCheckbox, *outboundCheckbox, *timeInput;
+static Ihandle *enabledToggle, *lagControls;
 
 void lagUIUseController(AppController *controller) { app = controller; }
 
@@ -51,9 +52,19 @@ static int enabledChanged(Ihandle *ih, int state) {
 }
 
 void lagUIBindToggle(Ihandle *toggle, Ihandle *controls) {
+    enabledToggle = toggle;
+    lagControls = controls;
     IupSetCallback(toggle, "ACTION", (Icallback)enabledChanged);
     IupSetInt(toggle, "VALUE", app->lag.enabled);
     IupSetAttribute(controls, "ACTIVE", app->lag.enabled ? "YES" : "NO");
+}
+
+void lagUIRefresh(void) {
+    IupSetInt(enabledToggle, "VALUE", app->lag.enabled);
+    IupSetInt(inboundCheckbox, "VALUE", app->lag.inbound);
+    IupSetInt(outboundCheckbox, "VALUE", app->lag.outbound);
+    IupSetInt(timeInput, "VALUE", (int)app->lag.inbound_ms);
+    IupSetAttribute(lagControls, "ACTIVE", app->lag.enabled ? "YES" : "NO");
 }
 
 static Ihandle *setupUI(void) {

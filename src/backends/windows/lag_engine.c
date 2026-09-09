@@ -53,7 +53,9 @@ short windowsLagProcess(PacketNode *head, PacketNode *tail) {
     PacketNode *pac = tail->prev;
     // pick up all packets and fill in the current time
     while (bufSize < KEEP_AT_MOST && pac != head) {
-        if (settings.enabled && checkDirection(pac->addr.Outbound, settings.inbound, settings.outbound)) {
+        DWORD delay = pac->addr.Outbound ? settings.outbound_ms : settings.inbound_ms;
+        // Zero means no intentional wait, including on a mixed-direction step.
+        if (settings.enabled && delay && checkDirection(pac->addr.Outbound, settings.inbound, settings.outbound)) {
             insertAfter(popNode(pac), bufHead)->timestamp = timeGetTime();
             ++bufSize;
             pac = tail->prev;
@@ -73,7 +75,7 @@ short windowsLagProcess(PacketNode *head, PacketNode *tail) {
         PacketNode *previous = pac->prev;
         DWORD delay = pac->addr.Outbound ? settings.outbound_ms : settings.inbound_ms;
         BOOL selected = settings.enabled && checkDirection(pac->addr.Outbound, settings.inbound, settings.outbound);
-        if (!selected || currentTime - pac->timestamp > delay) {
+        if (!selected || !delay || currentTime - pac->timestamp > delay) {
             insertAfter(popNode(pac), head);
             --bufSize;
         }

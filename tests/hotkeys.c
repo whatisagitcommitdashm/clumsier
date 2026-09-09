@@ -144,7 +144,14 @@ static void testPersistence(void) {
     writeText(path, "version=1\nstart=Ctrl+Alt+S\nstop=F6\ntoggle=F7\n");
     assert(hotkeyLoad(path, &loaded, error));
     assert(loaded.bindings[0].keys[VK_CONTROL] && loaded.bindings[0].keys['S']);
+    assert(hotkeyEmpty(&loaded.bindings[ACTION_NEXT_STEP]));
+    writeText(path, "version=2\nstart=Q\nstop=F6\ntoggle=F7\n");
+    assert(hotkeyLoad(path, &loaded, error));
+    assert(loaded.bindings[0].keys['Q'] && hotkeyEmpty(&loaded.bindings[ACTION_RESET_SEQUENCE]));
     settings.bindings[0] = parse("Q+E+Mouse4"); settings.bindings[1] = parse("7");
+    settings.bindings[ACTION_NEXT_STEP] = parse("N");
+    settings.bindings[ACTION_PREVIOUS_STEP] = parse("P");
+    settings.bindings[ACTION_RESET_SEQUENCE] = parse("R");
     assert(hotkeySave(path, &settings, error)); assert(hotkeyLoad(path, &loaded, error));
     assert(!memcmp(&settings, &loaded, sizeof(settings)));
     previous = loaded;
@@ -153,6 +160,7 @@ static void testPersistence(void) {
     writeText(path, "version=2\nstart=Q\nstop=Q+E\ntoggle=F7\n");
     assert(!hotkeyLoad(path, &loaded, error));
     writeText(path, "version=2\nstart=Q\nstop=F6\n"); assert(!hotkeyLoad(path, &loaded, error));
+    writeText(path, "version=3\nstart=Q\nstop=F6\ntoggle=F7\n"); assert(!hotkeyLoad(path, &loaded, error));
     assert(hotkeySave(path, &settings, error));
     swprintf(badPath, MAX_PATH, L"%ls\\settings.ini", path);
     assert(hotkeysApply(&settings, NULL, error)); previous = matcher.settings;
@@ -161,7 +169,7 @@ static void testPersistence(void) {
     assert(!memcmp(&matcher.settings, &previous, sizeof(previous)));
     assert(hotkeyLoad(path, &loaded, error)); assert(!memcmp(&loaded, &previous, sizeof(loaded)));
     assert(DeleteFileW(path));
-    puts("PASS version-1 migration, version-2 round trip, malformed files and save-failure rollback");
+    puts("PASS version-1/2 migration, six-action version-3 round trip, malformed files and save-failure rollback");
 }
 static void testForwarding(void) {
     KBDLLHOOKSTRUCT key = {0};
@@ -208,7 +216,23 @@ int main(void) {
     SendMessageW(messageWindow, INPUT_MESSAGE, MAKEWPARAM('W', TRUE), inputGeneration);
     SendMessageW(messageWindow, INPUT_MESSAGE, MAKEWPARAM('W', FALSE), inputGeneration);
     assert(finishedRecordings == 1 && lastRecorded.keys['W']);
-    hotkeysRecordCancel(); hotkeysClose();
+    hotkeysRecordCancel();
+    hotkeysPause(); hotkeysPause();
+    memset(matcher.physical, 0, sizeof(matcher.physical)); memset(&matcher.down, 0, sizeof(matcher.down));
+    matcher.waitForRelease = FALSE;
+    deliverInput(VK_F7, TRUE); deliverInput(VK_F7, FALSE);
+    assert(dispatched[ACTION_TOGGLE_CAPTURE] == 1);
+    hotkeysResume();
+    memset(matcher.physical, 0, sizeof(matcher.physical)); memset(&matcher.down, 0, sizeof(matcher.down));
+    matcher.waitForRelease = FALSE;
+    deliverInput(VK_F7, TRUE); deliverInput(VK_F7, FALSE);
+    assert(dispatched[ACTION_TOGGLE_CAPTURE] == 1);
+    hotkeysResume();
+    memset(matcher.physical, 0, sizeof(matcher.physical)); memset(&matcher.down, 0, sizeof(matcher.down));
+    matcher.waitForRelease = FALSE;
+    deliverInput(VK_F7, TRUE); deliverInput(VK_F7, FALSE);
+    assert(dispatched[ACTION_TOGGLE_CAPTURE] == 2);
+    hotkeysClose();
     assert(removals == 3 && !inputThread && !messageWindow);
     assert(hotkeysOpen(recordAction, error)); hotkeysClose(); assert(removals == 5);
     puts("PASS partial hook failure, retry, UI dispatch, stale-event rejection, record delivery and shutdown");

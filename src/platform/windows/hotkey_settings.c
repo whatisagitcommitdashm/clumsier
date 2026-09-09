@@ -158,7 +158,8 @@ BOOL hotkeySettingsPath(wchar_t path[MAX_PATH], char *error) {
 BOOL hotkeyLoad(const wchar_t *path, HotkeySettings *settings, char *error) {
     char file[HOTKEY_TEXT_SIZE * ACTION_COUNT + 128], *line, *next;
     DWORD length;
-    unsigned int seen = 0; // Bits 0..2 track actions; bit 3 tracks the version line.
+    unsigned int seen = 0;
+    int version = 0;
     HotkeySettings loaded;
     HANDLE handle = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
     if (handle == INVALID_HANDLE_VALUE) {
@@ -182,21 +183,24 @@ BOOL hotkeyLoad(const wchar_t *path, HotkeySettings *settings, char *error) {
         equals = strchr(line, '='); if (!equals) goto invalid;
         *equals++ = '\0';
         if (!strcmp(line, "version")) {
-            // Version 1 used one key plus modifiers. Its names still parse as a
-            // set, so loading needs no rewrite; the next explicit save writes v2.
-            if ((seen & 8) || (strcmp(equals, "1") && strcmp(equals, "2"))) goto invalid;
-            seen |= 8;
+            if (version || (strcmp(equals, "1") && strcmp(equals, "2") && strcmp(equals, "3"))) goto invalid;
+            version = atoi(equals);
         } else {
             if (!strcmp(line, "start")) index = ACTION_START_CAPTURE;
             else if (!strcmp(line, "stop")) index = ACTION_STOP_CAPTURE;
             else if (!strcmp(line, "toggle")) index = ACTION_TOGGLE_CAPTURE;
+            else if (!strcmp(line, "next_step")) index = ACTION_NEXT_STEP;
+            else if (!strcmp(line, "previous_step")) index = ACTION_PREVIOUS_STEP;
+            else if (!strcmp(line, "reset_sequence")) index = ACTION_RESET_SEQUENCE;
             else goto invalid;
             if ((seen & (1u << index)) || !hotkeyParse(equals, &loaded.bindings[index], error)) goto invalid;
             seen |= 1u << index;
         }
         line = next;
     }
-    if (seen != 15 || !hotkeyValidate(&loaded, error)) goto invalid;
+    // Old files retain their three bindings; new actions start unassigned.
+    // Don't rewrite a user's file until they explicitly choose Apply & Save.
+    if (!version || seen != (version < 3 ? 7u : (1u << ACTION_COUNT) - 1u) || !hotkeyValidate(&loaded, error)) goto invalid;
     // Publish only a complete, validated file. A bad line must not leave the
     // caller with a mixture of old settings and partially loaded ones.
     *settings = loaded;
@@ -208,17 +212,20 @@ invalid:
 
 BOOL hotkeySave(const wchar_t *path, const HotkeySettings *settings, char *error) {
     wchar_t temporary[MAX_PATH];
-    char start[HOTKEY_TEXT_SIZE], stop[HOTKEY_TEXT_SIZE], toggle[HOTKEY_TEXT_SIZE], file[HOTKEY_TEXT_SIZE * ACTION_COUNT + 128];
+    char binding[HOTKEY_TEXT_SIZE], file[HOTKEY_TEXT_SIZE * ACTION_COUNT + 256];
+    const char *keys[ACTION_COUNT] = {"start", "stop", "toggle", "next_step", "previous_step", "reset_sequence"};
+    int i;
     DWORD length, written;
     HANDLE handle;
     BOOL saved;
     if (!hotkeyValidate(settings, error)) return FALSE;
     if (wcslen(path) + 4 >= MAX_PATH) { strcpy(error, "Settings path is too long."); return FALSE; }
     swprintf(temporary, MAX_PATH, L"%ls.tmp", path);
-    hotkeyFormat(settings->bindings[0], start);
-    hotkeyFormat(settings->bindings[1], stop);
-    hotkeyFormat(settings->bindings[2], toggle);
-    length = (DWORD)sprintf(file, "version=2\nstart=%s\nstop=%s\ntoggle=%s\n", start, stop, toggle);
+    length = (DWORD)sprintf(file, "version=3\n");
+    for (i = 0; i < ACTION_COUNT; ++i) {
+        hotkeyFormat(settings->bindings[i], binding);
+        length += (DWORD)sprintf(file + length, "%s=%s\n", keys[i], binding);
+    }
     // Write beside the destination, then replace it after the write is flushed.
     // A failed write should leave the previous settings file available to load.
     handle = CreateFileW(temporary, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);

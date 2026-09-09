@@ -16,6 +16,12 @@ Save configurations and arbitrary-length named steps. Add configurable shortcuts
 
 Versioned JSON import/export with validation, preview, and duplicate handling. Personal hotkeys and layout remain local by default. Imports never activate automatically. Verify round-trip fidelity and invalid-file handling.
 
+## Timed sequence playback
+
+Add optional automatic advancement with a customizable duration for each step, so a player can start a sequence at the beginning of a game and let it run. Keep manually advanced sequences supported. Include timing in shared presets, while baseline profiles and hotkeys stay local.
+
+Before implementation, settle how Play/Pause, capture Stop, manual Next/Previous, Reset, and sequence switching affect the timer. Define the final-step behavior explicitly (hold, repeat, or stop), show the time remaining, and use a monotonic clock so wall-clock changes cannot skip steps. Failed step changes should pause playback and retain the accepted state. Test timers with a fake clock, including delayed UI callbacks, and verify actual transitions in game. This is a future milestone, not part of the current UI pass.
+
 ## 5. Launcher and scrolling
 
 Search presets by name. Add bounded wheel adjustment with configurable increments and visible status. Wheel edits are temporary unless saved. Verify focus restoration and input conflicts in the intended game environment.
