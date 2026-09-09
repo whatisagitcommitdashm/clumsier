@@ -32,7 +32,9 @@ The core tests can also be compiled with a standard C11 compiler, independently 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Isrc tests/core.c src/core/actions.c src/core/controller.c src/core/network.c src/core/hotkey_matcher.c src/core/preset.c src/core/preset_json.c external/cjson/cJSON.c -DCJSON_NESTING_LIMIT=32 -o core-tests
 ```
 
-The core has been checked with MSVC and the locally installed MinGW GCC. This is not a Linux or macOS backend test; neither backend exists yet.
+The core has been checked with MSVC and the locally installed MinGW GCC. This is not a Linux or macOS backend test. Separate [Linux](LINUX.md) and [macOS](MACOS.md) prototypes have their own application builds and checks; neither changes the Windows application. See [platform development](PLATFORM-DEVELOPMENT.md) for their scope and validation requirements.
+
+The portable terminal frontend is tested with `sh scripts/test-prototype.sh` on a Unix system with a C11 compiler. These tests use a fake backend but the real preset parser and controller, and cover command input, sequence navigation, failed changes, and cleanup. Real Linux packet capture is tested separately as described in the Linux guide.
 
 ## Other build definitions
 
