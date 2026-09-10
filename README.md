@@ -10,6 +10,13 @@ Independently maintained by [niko (whatisagitcommitdashm)](https://github.com/wh
 
 Baseline commit: `357e1e67a5803ffdd7d483b463575508a0a5f578`.
 
+## New interface preview
+
+A separate [Qt Quick prototype](docs/QT-UI-PREVIEW.md) explores the new interface.
+It uses sample data and does not change network traffic. Its design draws
+inspiration from [Monkeytype](https://monkeytype.com), Zen Browser's compact
+sidebar, and Ninjabrain Bot's compact in-game display.
+
 ## Global hotkeys
 
 The defaults are **F5: Start**, **F6: Stop**, and **F7: Toggle**. Start leaves an already running capture running; Stop leaves a stopped capture stopped. Toggle switches between those states.
@@ -69,3 +76,5 @@ This is an operational Windows application with a portable core, not a Linux/mac
 The original [MIT license](LICENSE) is retained; original Clumsier additions are also provided under MIT. Bundled dependencies retain their separate licenses. Release packaging must include the appropriate notices and meet their redistribution requirements.
 
 Preset JSON uses [cJSON 1.7.19](external/cjson/README.clumsier.md), with its [MIT notice](external/cjson/LICENSE) retained.
+
+The Qt preview includes selected [Tinted Theming palettes](third_party/tinted-schemes/README.md), with their [MIT notice](third_party/tinted-schemes/LICENSE) retained. Its theme picker is inspired by Monkeytype and implemented independently.
