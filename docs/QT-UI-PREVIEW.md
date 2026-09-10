@@ -1,12 +1,17 @@
 # Qt interface prototype
 
-This is the first UI migration checkpoint: a native C++ executable hosting Qt
-Quick/QML. It is separate from the working Windows application and has no
-WinDivert connection. Start/Stop and the sample sequences are simulated.
+The Qt Quick frontend now uses the existing Windows preset library, C controller,
+WinDivert Lag backend, and global hotkey listener. It remains a separate executable
+from the IUP application. This is an integration build for manual testing, not a
+finished release; only Lag is wired into this frontend.
 
 ## Run
 
-Open `bin/qt-preview/clumsier-ui-preview.exe`. No administrator rights are needed.
+Close the old IUP application before using this build so both applications do not
+listen to the same hotkeys or capture the same traffic. Open
+`bin/qt-preview/clumsier-ui-preview.exe`. The Windows build requests administrator
+permission when opened. Capture stays stopped until Start or a configured global
+Start/Toggle shortcut is pressed.
 
 Try selecting steps, editing a target, switching tabs, resizing the window, and
 using the small panel button beside **sequences**. That button switches between
@@ -22,20 +27,54 @@ translucent background; text stays opaque. The reveal starts without a dwell
 timer, uses a short slide, and leaves a small hover corridor across the inset gap.
 Reduced motion disables the slide. Pinned mode keeps the original solid layout.
 
-F7 starts/stops the preview; F8 advances its sample active step. These shortcuts
-only work while the preview has focus. The real app's saved global shortcuts are
-not loaded or modified. Sample edits are discarded on exit.
+Saved Windows hotkeys are loaded through the existing adapter (default toggle: F7).
+The Hotkeys tab records keyboard/mouse chords and saves validated changes immediately.
+Original input continues to the game. Actions pause while typing into a field,
+using a dialog/theme picker, or working in the focused Hotkeys tab.
+
+Sequences and server profiles share `%LOCALAPPDATA%\Clumsier` with the IUP app.
+Save/Discard controls appear while the sequence has unsaved changes. Navigating
+away offers Save, Discard, or Cancel; a failed save keeps the dialog and draft
+open. Closing with unsaved edits stops capture and offers the same choices.
+Duplicate creates a new draft; import validates JSON and saves a separate entry.
+While playing, the sequence fields are read-only and step clicks remain live.
+Choose Edit to stop through the existing confirmation before changing anything.
+Saving while stopped prepares the sequence immediately for the next Start.
+
+Quick Controls and Sequences select what Start activates. Switching between them,
+or selecting another sequence, stops capture. A confirmation appears before
+switching a running activity; Cancel keeps the current page and capture.
+**Don’t show this message again** persists across restarts and only suppresses
+the warning: switching still stops capture. You can restore the confirmation in
+Settings. Hotkeys and Settings do not change
+the active mode. A missing or incomplete sequence disables Start, including
+global Start/Toggle actions. Returning to Quick Controls restores its last
+applied delay and direction for this session.
+
+Quick Controls applies an inbound/outbound delay through the same controller.
+Changing traffic selection requires Stop; failed operations leave accepted state
+unchanged. Start/Stop and next/previous/reset operate on accepted controller state.
 
 Target ping and Lowest available are exclusive modes. Lowest available clears
 and disables the number field. Switching back starts at zero rather than
 restoring a hidden old target.
 
-Settings offers interface size, reduced motion, compact mode, and bottom hints.
+Each sequence remembers its selected server in the local `sequence-servers.ini`
+file alongside the preset library. Existing and imported sequences need a server
+selected once. This association is not exported: other players select their own
+server baseline. Duplicates initially inherit the original server.
+
+During playback, the highlighted step follows Next/Previous/Reset and hotkeys.
+Clicking a step also changes playback; a rejected change leaves the active step
+untouched. Previous, Reset, and Next sit beside Start/Stop in the playback area.
+While stopped, clicking a row selects the step to edit.
+
+Settings offers interface size, reduced motion, compact mode, bottom hints,
+switch confirmations, and Advanced mode. Advanced mode defaults to off and
+reveals the sequence traffic settings when enabled.
 Those preferences persist under the separate `Clumsier/ClumsierUiPreview`
 application identity (on Windows, Qt's native settings use the current user's
-registry). The theme picker, HUD, preset file operations, and real hotkey editor
-are later checkpoints. Buttons for those unfinished preset operations explain
-their status instead of pretending to save files.
+registry). HUD preferences use the same settings identity.
 
 ## Build
 
@@ -71,13 +110,17 @@ python -m aqt install-qt windows desktop 6.10.3 win64_msvc2022_64 -O bin/Qt --ar
 - `Theme.qml`: shared visual values and motion/scale preferences.
 - `ThemePicker.qml`: searchable live previews, keyboard navigation, and favorites.
 - `ThemeCatalog.js`, `TintedThemes.js`: bundled palettes, separate from the picker.
-- `QuietButton.qml`, `QuietField.qml`: reusable themed controls with focus states.
+- `QuietButton.qml`, `QuietField.qml`, `QuietChoice.qml`, `QuietCheckBox.qml`,
+  `QuietDialog.qml`: shared themed controls, including popup and pressed states.
 - `tests/qt_shell.cpp`: real mouse/keyboard events, resize/render checks and
   isolated settings. Set `CLUMSIER_SCREENSHOTS` to save renders during the test.
 
-The sample state in QML is temporary. The next integration stage will replace it
-with accepted state from the C controller through a C++ bridge. Network processing
-will not move into QML.
+`app_bridge.cpp` translates QML drafts to the existing strict preset JSON parser
+and delegates storage, validation, playback, and hotkeys to C.
+`LiveWorkspace.qml` contains the functional editors. `lag_runtime.c` supplies the
+Lag-only legacy scheduler table without linking IUP or other effects.
+The original visual sample remains available to shell tests and non-Windows
+UI development builds; only Windows currently has live adapters connected.
 
 ## Design review
 
@@ -92,6 +135,10 @@ edges or corners to resize. Qt starts the native move/resize operations; a small
 Windows frame adapter preserves native maximize mechanics and the monitor work
 area while removing the separate title bar. Check snapping, dragging between
 monitors and taskbar behavior manually on your desktop.
+On Windows 11, the normal window requests native rounded corners. Maximized
+and snapped windows retain square edges; older Windows versions retain their
+normal frame. Sequence and step rows show the theme hover color only while the
+pointer is over them, independently of their selected state.
 Native Linux/macOS builds and their window behavior have not been tested here.
 
 The theme button in the header opens the picker. Search or use Up/Down to
@@ -110,7 +157,91 @@ are in `third_party/tinted-schemes`. No themes are downloaded at runtime.
 
 Monkeytype inspired the typography, restrained visual hierarchy and
 theme picker. Zen Browser inspired compact sidebar behavior; Ninjabrain Bot
-inspired the planned HUD. This prototype contains no code copied from those
+inspired the compact HUD. This prototype contains no code copied from those
 projects. Qt is dynamically linked. This is a local development build, not a
 release package; include the applicable Qt/third-party licenses and source-access
 information when preparing a distributable release.
+
+## HUD draft
+
+Use the HUD button beside playback controls, or enable it in Settings. It is a
+separate always-on-top, non-activating tool window: minimizing the editor does
+not hide it, and clicking its controls should leave keyboard focus in the game.
+Drag its Running/Stopped label to move it. The close button only hides the HUD;
+closing the main application shuts down capture and closes both windows. The
+HUD only cancels standalone close requests, so it cannot veto application exit.
+Process-level tests cover shutdown with real hotkey listeners, isolated settings,
+and fake capture, with the HUD both shown and hidden.
+
+The HUD shows accepted sequence/step state, estimated target ping (not a live
+measurement), or added inbound/outbound delay. Stopped values are explicitly
+labelled as applying when started. Its controls use the same controller and
+validation as the editor. Settings offers independent size, background opacity,
+and optional playback controls; text remains opaque for readability. These
+preferences survive restarts; placement currently lasts for the session. Bring
+HUD here recovers it beside the editor.
+
+Check it over your actual game, including your usual display mode. A Windows event listener restores the HUD above the foreground window after
+activation or fullscreen resize events, without changing focus. It is inactive
+while the HUD is hidden. The native flags and editor minimization are tested;
+a fullscreen foreground test also runs when Windows grants the test window
+focus. True exclusive fullscreen bypasses desktop composition and is not
+supported by this desktop-window approach; use borderless/windowed mode when
+necessary. Actual Minecraft fullscreen behavior still needs manual verification.
+
+Quick Controls applies each valid whole number (0–15000 ms) as you type, including
+during capture. There is no Apply button. Invalid or empty input stays editable
+with an inline explanation; the last valid value remains selected. Test typing
+slowly across status updates, correcting invalid text, and entering zero while
+running. Traffic direction changes apply while stopped and are locked during capture.
+
+## Sequence editor
+
+The title itself is editable while stopped. The actions button opens description,
+duplicate, delete, import, and export; secondary actions do not crowd the steps.
+The server summary shows the selected name and baseline. Manage servers opens
+selection and profile controls, stopping playback first when necessary. Server
+choices are saved immediately; editing a shared server baseline affects every
+sequence using that profile.
+
+Step rows align numbers, names, and values. The adjacent editor shows the target
+and estimated added delay, or explains why the baseline is the lowest achievable
+ping. Add, Remove, and reorder stay with the list; Wrap at end stays below it.
+At narrow widths the editor and playback controls stack instead of clipping.
+
+## Integration acceptance checks
+
+1. Start with capture stopped. Open an existing sequence, edit and save a step,
+   restart, and confirm the edit and server profiles survived.
+2. Try Discard, duplicate, delete (with confirmation), import, and export. Check
+   both target-ping and added-delay sequences, including their traffic settings.
+3. Pick a server and select a saved sequence. Start capture, advance/reset/rewind,
+   and repeatedly press your Start/Stop/Toggle bindings. Lowest available should
+   remove added delay promptly (server ping displays can still average samples).
+4. During playback, fields should be read-only and clicking steps should change
+   playback. Choose Edit: Cancel should keep playback running; Continue should
+   stop before unlocking the fields. Switch from Quick Controls to Sequences and between
+   sequences: Cancel should keep capture running, Continue should stop it and
+   select the new activity. Repeat after restarting with the warning disabled.
+   Select no sequence (or a target sequence without a server) and verify Start
+   and global Start/Toggle cannot activate a previous delay.
+5. Test Quick Controls, including zero delay and Stop. Close during capture and
+   confirm traffic recovers. Opening the Windows executable should request
+   administrator permission before showing the app.
+6. Record a letter/mouse chord, try a conflicting binding, cancel a recording,
+   restart, and confirm saved bindings. Confirm input still reaches the game and
+   typing in editors or the theme picker does not trigger capture actions.
+
+7. Assign different servers to two sequences, restart, and check each restores
+   its own baseline. Check the highlight follows hotkeys and clicking a step
+   changes the live delay.
+8. Change a title, navigate away, and test Save, Discard, and Cancel. An invalid
+   title must keep you in the editor after a failed Save. Try closing with edits.
+9. In Settings, enable Advanced mode and restore switch confirmations. Restart
+   and verify both preferences. Review dropdowns and checkbox presses in light
+   and dark themes.
+
+Automated bridge tests use a temporary library and fake network backend, with no
+global hooks. They cover disk persistence, import/export, draft protection,
+validation, active snapshots, failed applies/starts, idempotent actions, and live
+QML loading. The real WinDivert driver and in-game input still need manual checks.

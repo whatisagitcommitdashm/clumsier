@@ -24,7 +24,11 @@ if errorlevel 1 exit /b 1
 "%CLUMSIER_QT_ROOT%\bin\windeployqt.exe" --release --no-translations --qmldir src/ui/qt bin/qt-preview/clumsier-ui-preview.exe
 if errorlevel 1 exit /b 1
 copy /y LICENSE bin\qt-preview\Clumsier-LICENSE.txt >nul
+copy /y external\WinDivert-2.2.0-A\x64\WinDivert.dll bin\qt-preview\ >nul
+copy /y external\WinDivert-2.2.0-A\x64\WinDivert64.sys bin\qt-preview\ >nul
+copy /y external\WinDivert-2.2.0-A\LICENSE bin\qt-preview\WinDivert-LICENSE.txt >nul
+copy /y external\cjson\LICENSE bin\qt-preview\cJSON-LICENSE.txt >nul
 copy /y third_party\tinted-schemes\LICENSE bin\qt-preview\Tinted-Theming-LICENSE.txt >nul
 if errorlevel 1 exit /b 1
 echo Qt UI preview built: bin\qt-preview\clumsier-ui-preview.exe
-echo This prototype does not alter network traffic.
+echo Windows will request administrator permission on launch. Capture begins only when Start is pressed.

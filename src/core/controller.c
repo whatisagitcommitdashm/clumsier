@@ -65,16 +65,9 @@ void controllerUnloadPreset(AppController *app) {
     app->preset_loaded = false;
 }
 
-static bool moveStep(AppController *app, AppAction action, char *error) {
-    size_t next = app->active_step;
+bool controllerSelectStep(AppController *app, size_t next, char *error) {
     StepResult resolved;
     if (!app->preset_loaded) { strcpy(error, "Load a preset before using sequence controls."); return false; }
-    if (action == ACTION_RESET_SEQUENCE) next = 0;
-    else if (action == ACTION_NEXT_STEP) {
-        if (next + 1 < app->preset.step_count) ++next;
-        else if (app->preset.loop) next = 0;
-    } else if (next) --next;
-    else if (app->preset.loop) next = app->preset.step_count - 1;
     if (!presetResolve(&app->preset, next, app->has_baseline, app->baseline_ms, &resolved, error)) return false;
     if (controllerIsRunning(app) && !app->backend.ops->apply_lag(app->backend.context, &resolved.lag, error)) return false;
     // Commit the cursor and settings together, only after the backend accepts.
@@ -82,6 +75,18 @@ static bool moveStep(AppController *app, AppAction action, char *error) {
     app->step_result = resolved;
     app->active_step = next;
     return true;
+}
+
+static bool moveStep(AppController *app, AppAction action, char *error) {
+    size_t next = app->active_step;
+    if (!app->preset_loaded) { strcpy(error, "Load a preset before using sequence controls."); return false; }
+    if (action == ACTION_RESET_SEQUENCE) next = 0;
+    else if (action == ACTION_NEXT_STEP) {
+        if (next + 1 < app->preset.step_count) ++next;
+        else if (app->preset.loop) next = 0;
+    } else if (next) --next;
+    else if (app->preset.loop) next = app->preset.step_count - 1;
+    return controllerSelectStep(app, next, error);
 }
 
 bool controllerExecute(AppController *app, AppAction action, char *error) {

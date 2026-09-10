@@ -1,14 +1,22 @@
 #pragma once
 #include <stdio.h>
 #include <assert.h>
+#ifdef CLUMSIER_LAG_ONLY
+typedef struct Ihandle_ Ihandle; // Opaque legacy slots; the Qt target never uses them.
+#else
 #include "iup.h"
+#endif
 #include "windivert.h"
 
 #define CLUMSY_VERSION "0.3"
 #define MSG_BUFSIZE 512
 #define FILTER_BUFSIZE 1024
 #define NAME_SIZE 16
+#ifdef CLUMSIER_LAG_ONLY
+#define MODULE_CNT 1
+#else
 #define MODULE_CNT 8
+#endif
 #define ICON_UPDATE_MS 200
 
 #define CONTROLS_HANDLE "__CONTROLS_HANDLE"

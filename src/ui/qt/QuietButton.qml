@@ -9,7 +9,11 @@ Button {
     property bool selected: false
     property bool accentText: false
     property bool alignLeft: false
-    hoverEnabled: true
+    hoverEnabled: false
+    // Track the pointer separately from the button's press/focus state. Rows
+    // should stop looking hovered when the pointer leaves, even after a click.
+    readonly property bool pointerInside: pointerHover.hovered && enabled && visible
+    HoverHandler { id: pointerHover; blocking: false }
     implicitHeight: 38 * theme.scale
     implicitWidth: Math.max(38 * theme.scale, contentItem.implicitWidth + 28 * theme.scale)
     padding: 10 * theme.scale
@@ -29,7 +33,7 @@ Button {
     background: Rectangle {
         radius: 5
         color: control.down || control.selected ? control.theme.selected
-               : control.hovered ? control.theme.hover
+               : control.pointerInside ? control.theme.hover
                : control.subtle ? (control.transparentIdle ? "transparent" : control.theme.background) : control.theme.surface
         border.width: control.visualFocus || !control.subtle ? 1 : 0
         border.color: control.visualFocus ? control.theme.accent : control.theme.border

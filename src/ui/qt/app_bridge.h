@@ -1,0 +1,74 @@
+#pragma once
+#include <QObject>
+#include <QVariant>
+#include <QUrl>
+#include <memory>
+extern "C" {
+#include "core/network.h"
+}
+
+// QML owns presentation and editor drafts. The C controller owns accepted
+// network state; the platform adapters own disk access and global input.
+class AppBridge : public QObject {
+    Q_OBJECT
+    Q_PROPERTY(QVariantList presets READ presets NOTIFY libraryChanged)
+    Q_PROPERTY(QVariantList profiles READ profiles NOTIFY libraryChanged)
+    Q_PROPERTY(QVariantMap draft READ draft NOTIFY draftChanged)
+    Q_PROPERTY(QString selectedId READ selectedId NOTIFY draftChanged)
+    Q_PROPERTY(bool dirty READ dirty NOTIFY draftChanged)
+    Q_PROPERTY(QVariantMap state READ state NOTIFY stateChanged)
+    Q_PROPERTY(QString error READ error NOTIFY errorChanged)
+    Q_PROPERTY(QString profileId READ profileId NOTIFY stateChanged)
+    Q_PROPERTY(QVariantList bindings READ bindings NOTIFY bindingsChanged)
+    Q_PROPERTY(QString recording READ recording NOTIFY bindingsChanged)
+public:
+    explicit AppBridge(NetworkBackend backend, const QString &root = {}, bool enableHotkeys = true, QObject *parent = nullptr);
+    ~AppBridge() override;
+    QVariantList presets() const;
+    QVariantList profiles() const;
+    QVariantMap draft() const;
+    QString selectedId() const;
+    bool dirty() const;
+    QVariantMap state() const;
+    QString error() const;
+    QString profileId() const;
+    QVariantList bindings() const;
+    QString recording() const;
+    Q_INVOKABLE void refresh();
+    Q_INVOKABLE bool selectPreset(const QString &id);
+    Q_INVOKABLE bool newPreset();
+    Q_INVOKABLE void updateDraft(const QVariantMap &value);
+    Q_INVOKABLE bool save();
+    Q_INVOKABLE void discard();
+    Q_INVOKABLE bool duplicate();
+    Q_INVOKABLE bool deletePreset();
+    Q_INVOKABLE bool importPreset(const QUrl &file);
+    Q_INVOKABLE bool exportPreset(const QUrl &file);
+    Q_INVOKABLE bool saveProfile(const QString &id, const QString &name, int baseline);
+    Q_INVOKABLE bool deleteProfile(const QString &id);
+    Q_INVOKABLE bool selectProfile(const QString &id);
+    Q_INVOKABLE bool loadSequence();
+    Q_INVOKABLE bool quickDelay(int milliseconds, int direction);
+    Q_INVOKABLE bool switchActivity(const QString &activity);
+    Q_INVOKABLE bool execute(int action);
+    Q_INVOKABLE bool selectStep(int index);
+    Q_INVOKABLE void setInputPaused(bool paused);
+    Q_INVOKABLE void recordBinding(int action);
+    Q_INVOKABLE void cancelRecording();
+    Q_INVOKABLE bool saveBinding(int action, const QString &text);
+    Q_INVOKABLE void clearError();
+signals:
+    void libraryChanged();
+    void draftChanged();
+    void stateChanged();
+    void errorChanged();
+    void bindingsChanged();
+private:
+    struct Data;
+    std::unique_ptr<Data> d;
+    bool fail(const QString &message);
+    void prepareSequence();
+    bool storeServerAssociation();
+    void restoreServerAssociation();
+    static AppBridge *listenerOwner;
+};

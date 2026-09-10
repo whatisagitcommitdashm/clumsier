@@ -26,3 +26,4 @@ bool controllerIsRunning(const AppController *app);
 void controllerShutdown(AppController *app);
 bool controllerLoadPreset(AppController *app, const Preset *preset, bool has_baseline, uint32_t baseline_ms, char *error);
 void controllerUnloadPreset(AppController *app);
+bool controllerSelectStep(AppController *app, size_t step, char *error);

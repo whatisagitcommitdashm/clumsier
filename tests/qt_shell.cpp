@@ -14,6 +14,7 @@
 #ifdef Q_OS_WIN
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <dwmapi.h>
 #endif
 
 // Exercise the real QML with Qt's event delivery. The test has its own settings
@@ -51,6 +52,12 @@ int main(int argc, char **argv)
         return nullptr;
     };
     auto click = [&](const char *name) {
+        if (QString::fromLatin1(name) == "themeButton") {
+            // Every theme-button click in this test opens the picker. Wait for
+            // the previous close animation, which can take extra frames when
+            // the test window is occluded, before sending another click.
+            if (!QTest::qWaitFor([&] { return !window->property("themePickerOpen").toBool(); }, 2000)) return false;
+        }
         auto *item = findItem(window->contentItem(), QString::fromLatin1(name));
         if (!item) return false;
         qInfo() << "Click" << name << item->mapToScene(QPointF(item->width()/2, item->height()/2));
@@ -60,6 +67,33 @@ int main(int argc, char **argv)
         return true;
     };
     bool ok = click("startButton");
+#ifdef Q_OS_WIN
+    DWM_WINDOW_CORNER_PREFERENCE corners = DWMWCP_DEFAULT;
+    const HRESULT cornerResult = DwmGetWindowAttribute(reinterpret_cast<HWND>(window->winId()),
+        DWMWA_WINDOW_CORNER_PREFERENCE, &corners, sizeof(corners));
+    // This attribute is available on Windows 11; older systems keep their frame.
+    if (SUCCEEDED(cornerResult))
+        ok &= check(corners == DWMWCP_ROUND, "Native window requests rounded corners");
+#endif
+    auto *hoverStep = findItem(window->contentItem(), "step1");
+    auto *hoverBackground = hoverStep ? hoverStep->property("background").value<QObject *>() : nullptr;
+    ok &= check(hoverBackground != nullptr, "Step has a themed background");
+    if (hoverBackground) {
+        QTest::mouseMove(window, QPoint(500, 180));
+        QTest::qWait(50);
+        const QVariant idleColor = hoverBackground->property("color");
+        const QPoint point = hoverStep->mapToScene(QPointF(60, hoverStep->height()/2)).toPoint();
+        QTest::mouseMove(window, point); QTest::qWait(50);
+        ok &= check(hoverStep->property("pointerInside").toBool() && hoverBackground->property("color") != idleColor,
+                    "Unselected step visibly highlights on hover");
+        QTest::mouseMove(window, QPoint(500, 180)); QTest::qWait(50);
+        ok &= check(!hoverStep->property("pointerInside").toBool() && hoverBackground->property("color") == idleColor,
+                    "Hover highlight clears on leave");
+        click("step1"); click("step0");
+        QTest::mouseMove(window, QPoint(500, 180)); QTest::qWait(50);
+        ok &= check(!hoverStep->property("pointerInside").toBool() && hoverBackground->property("color") == idleColor,
+                    "Previous selection does not retain a hover fill after clicking elsewhere");
+    }
     ok &= check(window->property("running").toBool(), "Start click updates preview");
     QTest::keyClick(window, Qt::Key_F7);
     ok &= check(!window->property("running").toBool(), "F7 stops preview");
@@ -120,6 +154,12 @@ int main(int argc, char **argv)
     ok &= check(window->property("interfaceScale").toDouble() == 1.0, "Scale returns to 100 percent");
     ok &= click("tab-sequences");
     auto typeText = [&](const QString &text) {
+        // The opening animation finishes by clearing and focusing search.
+        // Wait for that handoff instead of racing it with synthetic typing.
+        ok &= check(QTest::qWaitFor([&] {
+            auto *search = findItem(window->contentItem(), "themeSearch");
+            return search && search->hasActiveFocus();
+        }, 1200), "Theme search is ready for typing");
         for (auto c : text) QTest::keyClick(window, static_cast<Qt::Key>(c.toUpper().unicode()));
         QTest::qWait(100);
     };
@@ -159,8 +199,10 @@ int main(int argc, char **argv)
         QTest::qWait(250);
         ok &= check(window->property("activeTheme").toString() == "tinted-catppuccin-latte", "Brief hover does not preview");
         QTest::mouseMove(window, rowPoint + QPoint(2,0));
-        QTest::qWait(350);
-        ok &= check(window->property("activeTheme").toString() == "tinted-catppuccin-mocha", "Continuous hover previews after half a second");
+        // Allow event delivery/rendering to catch up on a busy desktop. The
+        // preceding assertion still checks that a brief hover cannot preview.
+        ok &= check(QTest::qWaitFor([&] { return window->property("activeTheme").toString() == "tinted-catppuccin-mocha"; }, 1200),
+                    "Continuous hover previews after the dwell delay");
         QTest::keyClick(window, Qt::Key_Up);
         QTest::mouseMove(window, QPoint(30,300));
         QTest::mouseMove(window, rowPoint);

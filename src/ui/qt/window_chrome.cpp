@@ -3,6 +3,7 @@
 #ifdef Q_OS_WIN
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <dwmapi.h>
 #endif
 
 WindowChrome::WindowChrome(QQuickWindow *window) : window_(window)
@@ -17,6 +18,11 @@ WindowChrome::WindowChrome(QQuickWindow *window) : window_(window)
                      WS_SYSMENU | WS_MAXIMIZEBOX | WS_MINIMIZEBOX);
     SetWindowPos(handle, nullptr, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    // Let the compositor round the actual window, including the client area.
+    // Windows keeps maximized/snapped windows square. Older Windows versions
+    // ignore this preference and retain their normal frame behavior.
+    const DWM_WINDOW_CORNER_PREFERENCE corners = DWMWCP_ROUND;
+    DwmSetWindowAttribute(handle, DWMWA_WINDOW_CORNER_PREFERENCE, &corners, sizeof(corners));
 #endif
 }
 

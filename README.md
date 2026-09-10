@@ -12,8 +12,9 @@ Baseline commit: `357e1e67a5803ffdd7d483b463575508a0a5f578`.
 
 ## New interface preview
 
-A separate [Qt Quick prototype](docs/QT-UI-PREVIEW.md) explores the new interface.
-It uses sample data and does not change network traffic. Its design draws
+A separate [Qt Quick frontend](docs/QT-UI-PREVIEW.md) now connects the new interface
+to saved sequences, server profiles, global hotkeys, and the Windows Lag backend.
+This integration build is ready for manual testing. Its design draws
 inspiration from [Monkeytype](https://monkeytype.com), Zen Browser's compact
 sidebar, and Ninjabrain Bot's compact in-game display.
 
