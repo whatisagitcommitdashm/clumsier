@@ -132,9 +132,13 @@ int main(int argc, char **argv) {
         check(bridge.deletePreset() && bridge.deleteProfile(otherServerId) && bridge.selectPreset(savedId), "Remove association-test copy");
         draft = bridge.draft(); draft["name"] = ""; bridge.updateDraft(draft);
         check(!bridge.save() && bridge.dirty(), "Invalid draft stays editable and cannot overwrite saved file"); bridge.discard();
+#ifdef Q_OS_WIN
         check(bridge.saveBinding(2, "W+Mouse4"), "Expanded binding parser available");
         check(!bridge.saveBinding(0, "W+Mouse4"), "Conflicting binding rejected");
         check(bridge.bindings()[2].toMap()["text"].toString().contains("Mouse4"), "Rejected edit preserves existing binding");
+#else
+        check(!bridge.globalHotkeysAvailable() && bridge.bindings().isEmpty(), "Linux does not advertise unsupported global bindings");
+#endif
 
         // Load the actual production workspace against isolated data and no hooks.
         // The existing shell test keeps exercising the visual demo independently.

@@ -18,6 +18,17 @@ This integration build is ready for manual testing. Its design draws
 inspiration from [Monkeytype](https://monkeytype.com), Zen Browser's compact
 sidebar, and Ninjabrain Bot's compact in-game display.
 
+## Linux prototype
+
+The cross-platform branch includes a [Linux terminal prototype](docs/LINUX.md)
+with a native NFQUEUE backend. It now builds and passes isolated real-packet
+checks on Fedora. Run `sh scripts/test-linux-network.sh --demo` after building
+to watch the four-step sequence change measured latency without affecting your
+normal connection. See [validation results and limits](docs/LINUX-VALIDATION.md).
+The [Qt frontend is now connected to Linux](docs/QT-LINUX.md). Open it with
+`sh scripts/run-qt-linux.sh`, or use `sh scripts/demo-qt-linux.sh` for an isolated
+GUI demo with live ping measurements. Linux global hotkeys remain pending.
+
 ## Global hotkeys
 
 The defaults are **F5: Start**, **F6: Stop**, and **F7: Toggle**. Start leaves an already running capture running; Stop leaves a stopped capture stopped. Toggle switches between those states.

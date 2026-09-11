@@ -5,6 +5,11 @@ WinDivert Lag backend, and global hotkey listener. It remains a separate executa
 from the IUP application. This is an integration build for manual testing, not a
 finished release; only Lag is wired into this frontend.
 
+For Linux build, launch, isolated demo, storage, and test instructions, see
+[Qt on Linux](QT-LINUX.md). The Windows instructions below remain applicable to
+the Windows build. Linux now has live networking and storage adapters, with
+global hotkeys still pending.
+
 ## Run
 
 Close the old IUP application before using this build so both applications do not
@@ -120,7 +125,7 @@ and delegates storage, validation, playback, and hotkeys to C.
 `LiveWorkspace.qml` contains the functional editors. `lag_runtime.c` supplies the
 Lag-only legacy scheduler table without linking IUP or other effects.
 The original visual sample remains available to shell tests and non-Windows
-UI development builds; only Windows currently has live adapters connected.
+UI development builds; Windows and Linux now have live adapters connected.
 
 ## Design review
 

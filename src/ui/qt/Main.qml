@@ -714,7 +714,7 @@ ApplicationWindow {
                         Label { text: captureButton.text; font: captureButton.font; color: appTheme.text }
                         Item { Layout.fillWidth: true }
                         Label {
-                            text: backend ? backend.bindings[2].text : "F7"
+                            text: backend ? (backend.bindings.length > 2 ? backend.bindings[2].text : "") : "F7"
                             font: captureButton.font; color: appTheme.muted
                             Layout.fillWidth: true; horizontalAlignment: Text.AlignRight; elide: Text.ElideRight
                         }
@@ -730,7 +730,7 @@ ApplicationWindow {
             Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24; Layout.preferredHeight: 42 * appTheme.scale
             Caption { text: Catalog.find(appTheme.activeId).name + " · UI preview" }
             Item { Layout.fillWidth: true }
-            Caption { text: backend ? "Ctrl+B sequences · Global bindings in Hotkeys" : "F7 start/stop    F8 next    Ctrl+B sequences" }
+            Caption { text: backend ? (backend.globalHotkeysAvailable ? "Ctrl+B sequences · Global bindings in Hotkeys" : "Ctrl+B sequences") : "F7 start/stop    F8 next    Ctrl+B sequences" }
         }
     }
     // Observe hover independently of buttons and resize handles. The trigger runs

@@ -173,6 +173,19 @@ static bool removeRules(void *context, char *error) {
     return linuxNftRun(command, output, sizeof(output), error);
 }
 
+static bool quiesceRules(void *context, char *error) {
+    LinuxBackend *backend = context;
+    char command[128], output[2048];
+    int ownership = linuxNftOwned(backend->table, error);
+    if (!ownership) return true;
+    if (ownership < 0) return false;
+    // Deleting the table unregisters its hooks, which drops pending NFQUEUE
+    // entries. Flush only rules here; retain hooks until verdicts and queue
+    // closure complete, then remove the empty table.
+    snprintf(command, sizeof(command), "flush table inet %s\n", backend->table);
+    return linuxNftRun(command, output, sizeof(output), error);
+}
+
 // 1 = handled a message, 0 = no message, -1 = a fatal transport/parsing error.
 static int readPackets(LinuxBackend *backend) {
     union { char bytes[65536]; struct nlmsghdr alignment; } buffer;
@@ -365,7 +378,7 @@ static bool applyLag(void *context, const LagSettings *lag, char *error) {
 }
 
 LinuxBackend *linuxBackendCreate(char error[NETWORK_ERROR_SIZE]) {
-    static const LinuxSessionOps operations = {openQueue, installRules, removeRules, drainQueue, closeQueue};
+    static const LinuxSessionOps operations = {openQueue, installRules, removeRules, drainQueue, closeQueue, quiesceRules};
     LinuxBackend *backend = calloc(1, sizeof(*backend));
     int status;
     if (!backend) { strcpy(error, "Could not allocate Linux backend."); return NULL; }

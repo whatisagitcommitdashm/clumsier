@@ -5,10 +5,53 @@ Linux NFQUEUE backend. It can start/stop capture, apply manual Lag, calculate
 target-ping steps from your baseline, and navigate sequences while running.
 The interface is a terminal, not the Windows GUI; there are no global hotkeys.
 
-**Native Linux compilation and network tests still need to run in a Linux
-environment.** Portable queue, rule-generation and injected session-failure
-tests passed on Windows GCC. That verifies logic, not Linux headers, installed
-nftables syntax, permissions or actual traffic.
+**Native build and isolated real-packet tests now pass on Fedora 42.** See
+[the validation report](LINUX-VALIDATION.md) for versions, measurements, the
+shutdown fix, and remaining limits. The terminal prototype is ready for local
+experimentation. The [Qt interface is now connected](QT-LINUX.md);
+physical-network/game acceptance remains.
+
+## Quick start on this Linux desktop
+
+Install the build dependency once (already done on the development machine):
+
+```sh
+sudo dnf install libnetfilter_queue-devel
+```
+
+From the repository root:
+
+```sh
+sh scripts/build-linux.sh
+sh scripts/test-linux-network.sh --demo
+```
+
+The demo runs the actual Clumsier executable and sends real packets between two
+private network namespaces connected by a virtual Ethernet cable. It displays
+baseline RTT, the four sequence steps (about 150, 0, 100, and 50 ms), and RTT after
+Stop. It needs no sudo and does not affect your Internet connection. Its
+namespaces disappear when their processes exit; no named namespaces or host
+firewall rules are created.
+
+Run all automated checks with:
+
+```sh
+sh scripts/test-linux-logic.sh
+sh scripts/test-prototype.sh
+sh scripts/test-linux-network.sh
+```
+
+The packet suite takes roughly a minute. It requires Python 3, `unshare`,
+`nsenter`, `setpriv`, `ip`, `ping`, and `nft`, plus enabled unprivileged user/network
+namespaces and kernel NFQUEUE support. These are available on the tested Fedora
+machine. If `unshare` is denied, use the sudo-based manual lab below on a system
+that permits it; do not remove the runner's isolation checks.
+
+**Use `ping -U` when measuring inbound delay.** Ordinary iputils ping can use a
+kernel receive timestamp from before NFQUEUE held the reply and display almost
+zero RTT even though delivery to the application was delayed. The runner uses
+user-to-user timing and also checks TCP/UDP echoes with a monotonic userspace
+clock.
 
 WSL 2 is suitable for the first build and isolated namespace tests once NFQUEUE
 and nftables support are available in its installed kernel. This exercises Linux
@@ -91,8 +134,11 @@ wakeup leaves prior settings intact. Every processing pass recomputes remaining
 waits from current settings and original receipt times. Zero delay or disabled
 directions release held packets too.
 
-Stop removes private rules first, then accepts held IDs and drains readable
-notifications, then closes the queue. Repeated Stop is safe. Worker failures
+Stop flushes the private table’s rules while retaining its base chains, then
+accepts held IDs and drains readable notifications, closes the queue, and finally
+deletes the empty table. Deleting the table before draining unregisters the
+Netfilter hooks and can discard queued packets; the packet suite covers this
+regression. Repeated Stop is safe. Worker failures
 mark capture stopped, report errors and follow the same cleanup path. Start joins
 a previous worker and retries outstanding cleanup before another session.
 Failed rule removal retains ownership for retry. Errors include the exact table
@@ -135,8 +181,8 @@ used, avoiding a reinjection loop.
   The prototype does not force-load defragmentation modules.
 - The high-level libnetfilter_queue API is documented as deprecated. It keeps
   this prototype readable; migration to the lower-level libmnl API can follow
-  native verification. A production app should also separate the privileged
-  helper from the interface.
+  native verification. The Qt interface now uses a separate privileged helper;
+  the terminal prototype still runs directly with network privileges.
 
 ## Isolated end-to-end test
 
@@ -155,7 +201,7 @@ sudo ip -n clumsier-client link set lo up
 sudo ip -n clumsier-server link set lo up
 sudo ip -n clumsier-client link set c0 up
 sudo ip -n clumsier-server link set s0 up
-sudo ip netns exec clumsier-client ping -c 5 192.0.2.2
+sudo ip netns exec clumsier-client ping -U -c 5 192.0.2.2
 ```
 
 In terminal A, from this checkout:
@@ -167,7 +213,7 @@ sudo ip netns exec clumsier-client ./build/linux/clumsier --preset examples/four
 In terminal B:
 
 ```sh
-sudo ip netns exec clumsier-client ping -i 0.2 192.0.2.2
+sudo ip netns exec clumsier-client ping -U -i 0.2 192.0.2.2
 ```
 
 **No manual firewall setup is needed.** Enter `start`, then `next` three times.
@@ -198,7 +244,7 @@ Check:
    `delay 100 150`: expect about 250 ms added RTT. Separately test real
    inbound-only and outbound-only capture selection.
 7. Add 2001:db8:1::1/64 to client c0 and 2001:db8:1::2/64 to server s0, wait for
-   address readiness and verify ping -6. Repeat with the numeric remote IPv6
+   address readiness and verify ping -U -6. Repeat with the numeric remote IPv6
    address in a preset. IPv6/fragment/offload verification remains pending.
 8. Start without privileges: it should fail clearly with no private table.
    Also test malformed addresses and Windows native filters. Two instances in
@@ -226,9 +272,9 @@ lag_queue tests live edits, zero/disabled directions, capacity, exact deadlines,
 failed verdict ownership/retry and 64-bit time. rules_session tests IPv4/IPv6
 canonicalization, protocol/direction/port predicates, injection rejection,
 ownership-aware cleanup ordering, partial setup failure, removal/drain failures,
-and repeated restart. Both pass strict Windows GCC C11 checks; rules_session
-links ws2_32 on Windows for numeric IP parsing. Native socket/process/thread
-boundaries still require Linux execution.
+and repeated restart. Both pass strict native Linux GCC C11 checks as well as the earlier Windows checks; rules_session
+links ws2_32 on Windows for numeric IP parsing. The automated network suite additionally exercises native socket/process/thread
+boundaries with actual traffic. See the validation report for remaining cases.
 
 backend.c owns the worker and NFQUEUE boundary; nft.c owns helper execution and
 ownership queries; rules.c generates filters; session.c enforces setup/teardown

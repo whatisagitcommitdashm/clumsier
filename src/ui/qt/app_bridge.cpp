@@ -1,4 +1,6 @@
+#ifdef _WIN32
 #include <winsock2.h>
+#endif
 #include "app_bridge.h"
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -8,8 +10,12 @@
 #include <algorithm>
 extern "C" {
 #include "core/controller.h"
+#ifdef _WIN32
 #include "platform/windows/preset_store.h"
 #include "platform/windows/hotkeys.h"
+#else
+#include "platform/linux/preset_store.h"
+#endif
 }
 
 struct AppBridge::Data {
@@ -19,8 +25,10 @@ struct AppBridge::Data {
     QVariantList presets, profiles;
     QVariantMap draft, saved;
     QString id, profile, error, recording;
+#ifdef Q_OS_WIN
     HotkeySettings keys{};
     wchar_t keyPath[MAX_PATH]{};
+#endif
     int recordAction = -1;
     QString activity = "quick controls";
     bool ready = true, sequenceStale = false;
@@ -55,6 +63,7 @@ AppBridge::AppBridge(NetworkBackend backend, const QString &root, bool enableHot
         d->associationsPath = QString::fromWCharArray(d->store.root) + "/sequence-servers.ini";
         refresh();
     }
+#ifdef Q_OS_WIN
     hotkeyDefaults(&d->keys);
     if (enableHotkeys) {
         bool pathReady;
@@ -72,6 +81,9 @@ AppBridge::AppBridge(NetworkBackend backend, const QString &root, bool enableHot
         d->listening = hotkeysOpen([](AppAction action) { if (listenerOwner) listenerOwner->execute(int(action)); }, error);
         if (!d->listening || !hotkeysApply(&d->keys, nullptr, error)) fail(QString::fromUtf8(error));
     }
+#else
+    Q_UNUSED(enableHotkeys);
+#endif
     // Read backend state rather than assuming a successful button click means
     // capture is still running. This also surfaces changes from global hotkeys.
     auto *timer = new QTimer(this);
@@ -79,7 +91,9 @@ AppBridge::AppBridge(NetworkBackend backend, const QString &root, bool enableHot
     timer->start(200);
 }
 AppBridge::~AppBridge() {
+#ifdef Q_OS_WIN
     if (d->listening) hotkeysClose();
+#endif
     if (listenerOwner == this) listenerOwner = nullptr;
     controllerShutdown(&d->controller);
 }
@@ -93,6 +107,13 @@ bool AppBridge::dirty() const { return d->draft != d->saved; }
 QString AppBridge::error() const { return d->error; }
 QString AppBridge::profileId() const { return d->profile; }
 QString AppBridge::recording() const { return d->recording; }
+bool AppBridge::globalHotkeysAvailable() const {
+#ifdef Q_OS_WIN
+    return true;
+#else
+    return false;
+#endif
+}
 QVariantMap AppBridge::state() const {
     const auto &app = d->controller;
     QString description = app.preset_loaded ? QString::fromUtf8(app.preset.name)
@@ -334,20 +355,25 @@ bool AppBridge::selectStep(int index) {
 }
 QVariantList AppBridge::bindings() const {
     QVariantList result;
+#ifdef Q_OS_WIN
     for (int i = 0; i < ACTION_COUNT; ++i) {
         char text[HOTKEY_TEXT_SIZE]{}; hotkeyFormat(d->keys.bindings[i], text);
         result.append(QVariantMap{{"action", i}, {"name", QString::fromUtf8(actionName(AppAction(i)))}, {"text", QString::fromUtf8(text)}});
     }
+#endif
     return result;
 }
 void AppBridge::setInputPaused(bool paused) {
     if (!d->listening || d->paused == paused) return;
     d->paused = paused;
+#ifdef Q_OS_WIN
     if (paused) hotkeysPause(); else hotkeysResume();
+#endif
 }
 void AppBridge::recordBinding(int action) {
     if (!d->listening || action < 0 || action >= ACTION_COUNT) { fail("Global hotkeys are unavailable."); return; }
     d->recordAction = action; d->recording = "Press your keys or mouse buttons, then release them."; emit bindingsChanged();
+#ifdef Q_OS_WIN
     hotkeysRecordBegin([](const HotkeyBinding *binding, BOOL finished) {
         auto *owner = listenerOwner;
         if (!owner) return;
@@ -360,15 +386,23 @@ void AppBridge::recordBinding(int action) {
             emit owner->bindingsChanged();
         }
     });
+#endif
 }
 void AppBridge::cancelRecording() {
+#ifdef Q_OS_WIN
     if (d->listening) hotkeysRecordCancel();
+#endif
     d->recordAction = -1; d->recording.clear(); emit bindingsChanged();
 }
 bool AppBridge::saveBinding(int action, const QString &text) {
     if (action < 0 || action >= ACTION_COUNT) return fail("Unknown action.");
+#ifdef Q_OS_WIN
     HotkeySettings next = d->keys; char error[HOTKEY_ERROR_SIZE]{};
     if (!hotkeyParse(text.toUtf8().constData(), &next.bindings[action], error) || !hotkeyValidate(&next, error)) return fail(QString::fromUtf8(error));
     if (d->listening && !hotkeysApply(&next, d->keyPath, error)) return fail(QString::fromUtf8(error));
     d->keys = next; clearError(); emit bindingsChanged(); return true;
+#else
+    Q_UNUSED(text);
+    return fail("Global hotkeys are not yet available on Linux. Use the playback buttons.");
+#endif
 }

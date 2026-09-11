@@ -5,9 +5,10 @@
 bool linuxSessionStop(LinuxSession *session, char *error) {
     bool okay = true;
     char detail[NETWORK_ERROR_SIZE] = "";
-    if (session->owned) {
-        if (session->ops->remove(session->context, detail)) session->owned = false;
-        else { snprintf(error, NETWORK_ERROR_SIZE, "%s", detail); okay = false; }
+    if (session->owned && session->open) {
+        if (!session->ops->quiesce(session->context, detail)) {
+            snprintf(error, NETWORK_ERROR_SIZE, "%s", detail); okay = false;
+        }
     }
     if (session->open) {
         // Even if removing rules fails, release what we can before closing.
@@ -18,6 +19,10 @@ bool linuxSessionStop(LinuxSession *session, char *error) {
         }
         session->ops->close(session->context);
         session->open = false;
+    }
+    if (session->owned) {
+        if (session->ops->remove(session->context, detail)) session->owned = false;
+        else { snprintf(error, NETWORK_ERROR_SIZE, "%s", detail); okay = false; }
     }
     return okay;
 }

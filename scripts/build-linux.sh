@@ -5,7 +5,12 @@ if [ "$(uname -s)" != Linux ]; then
     echo "Build this prototype on Linux with Linux headers and libraries." >&2
     exit 1
 fi
-pkg-config --exists libnetfilter_queue
+if ! pkg-config --exists libnetfilter_queue; then
+    echo "Missing libnetfilter_queue development files." >&2
+    echo "Fedora: sudo dnf install libnetfilter_queue-devel" >&2
+    echo "Debian/Ubuntu: sudo apt install libnetfilter-queue-dev" >&2
+    exit 1
+fi
 mkdir -p build/linux
 "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -pedantic -pthread \
     -DCJSON_NESTING_LIMIT=32 -Isrc $(pkg-config --cflags libnetfilter_queue) \

@@ -6,7 +6,7 @@
 
 typedef struct {
     char calls[64];
-    bool fail_open, fail_install, install_owned, fail_remove, fail_drain;
+    bool fail_open, fail_install, install_owned, fail_remove, fail_drain, fail_quiesce;
 } Fake;
 static void called(Fake *fake, char code) {
     size_t length = strlen(fake->calls);
@@ -36,9 +36,14 @@ static bool drain(void *context, char *error) {
     return true;
 }
 static void closeSession(void *context) { called(context, 'C'); }
+static bool quiesce(void *context, char *error) {
+    Fake *fake = context; called(fake, 'Q');
+    if (fake->fail_quiesce) { strcpy(error, "quiesce failed"); return false; }
+    return true;
+}
 
 static void sessions(void) {
-    static const LinuxSessionOps ops = {openSession, install, removeRules, drain, closeSession};
+    static const LinuxSessionOps ops = {openSession, install, removeRules, drain, closeSession, quiesce};
     Fake fake = {0};
     LinuxSession session = {&ops, &fake, false, false};
     char error[NETWORK_ERROR_SIZE] = "";
@@ -49,7 +54,7 @@ static void sessions(void) {
         assert(!linuxSessionStart(&session, error));
         assert(linuxSessionStop(&session, error));
         assert(linuxSessionStop(&session, error));
-        assert(!strcmp(fake.calls, "OIRDC"));
+        assert(!strcmp(fake.calls, "OIQDCR"));
     }
     fake = (Fake){0}; fake.fail_open = true;
     assert(!linuxSessionStart(&session, error));
@@ -59,20 +64,25 @@ static void sessions(void) {
     assert(!strcmp(fake.calls, "OIDC") && !session.open && !session.owned);
     fake = (Fake){0}; fake.fail_install = fake.install_owned = true;
     assert(!linuxSessionStart(&session, error));
-    assert(!strcmp(fake.calls, "OIRDC") && !session.open && !session.owned);
+    assert(!strcmp(fake.calls, "OIQDCR") && !session.open && !session.owned);
     fake = (Fake){0}; fake.fail_remove = true;
     assert(linuxSessionStart(&session, error));
     assert(!linuxSessionStop(&session, error));
-    assert(!strcmp(fake.calls, "OIRDC") && !session.open && session.owned);
+    assert(!strcmp(fake.calls, "OIQDCR") && !session.open && session.owned);
     assert(!linuxSessionStart(&session, error));
     fake.fail_remove = false;
     assert(linuxSessionStop(&session, error));
-    assert(!strcmp(fake.calls, "OIRDCR") && !session.owned);
+    assert(!strcmp(fake.calls, "OIQDCRR") && !session.owned);
     fake = (Fake){0}; fake.fail_drain = true;
     assert(linuxSessionStart(&session, error));
     assert(!linuxSessionStop(&session, error));
-    assert(!strcmp(fake.calls, "OIRDC") && !session.open && !session.owned);
+    assert(!strcmp(fake.calls, "OIQDCR") && !session.open && !session.owned);
     assert(strstr(error, "drain failed"));
+    fake = (Fake){0}; fake.fail_quiesce = true;
+    assert(linuxSessionStart(&session, error));
+    assert(!linuxSessionStop(&session, error));
+    assert(!strcmp(fake.calls, "OIQDCR") && !session.open && !session.owned);
+    assert(strstr(error, "quiesce failed"));
 }
 
 static void rules(void) {

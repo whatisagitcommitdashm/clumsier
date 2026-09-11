@@ -21,6 +21,7 @@ class AppBridge : public QObject {
     Q_PROPERTY(QString profileId READ profileId NOTIFY stateChanged)
     Q_PROPERTY(QVariantList bindings READ bindings NOTIFY bindingsChanged)
     Q_PROPERTY(QString recording READ recording NOTIFY bindingsChanged)
+    Q_PROPERTY(bool globalHotkeysAvailable READ globalHotkeysAvailable CONSTANT)
 public:
     explicit AppBridge(NetworkBackend backend, const QString &root = {}, bool enableHotkeys = true, QObject *parent = nullptr);
     ~AppBridge() override;
@@ -34,6 +35,8 @@ public:
     QString profileId() const;
     QVariantList bindings() const;
     QString recording() const;
+    bool globalHotkeysAvailable() const;
+    void reportBackendError(const QString &message) { fail(message); }
     Q_INVOKABLE void refresh();
     Q_INVOKABLE bool selectPreset(const QString &id);
     Q_INVOKABLE bool newPreset();

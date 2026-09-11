@@ -3,9 +3,9 @@
 The current milestone is an end-to-end Lag-only prototype for each platform.
 Linux has a terminal frontend and a native backend; macOS has a small host app
 and a packet-filter extension. Both are intended to load shared presets, apply
-their steps to real traffic, and stop cleanly. Native compilation and packet
-testing remain necessary before we can call either implementation working on
-its target OS. They are separate from the supported Windows application.
+their steps to real traffic, and stop cleanly. Linux now passes native compilation and isolated packet acceptance checks on
+Fedora; see [the validation report](LINUX-VALIDATION.md). macOS still needs native
+compilation and packet testing on its target OS. They are separate from the supported Windows application.
 
 ## Ownership during parallel development
 
@@ -57,8 +57,8 @@ Tests must distinguish code exercised with fake packets or callbacks from real
 network behavior. Any experiment that changes network rules belongs in an
 isolated test environment and must clean up only resources it owns.
 
-This development session runs on Windows without WSL installed. The project
-owner plans to run Linux native checks on the laptop's Linux partition. macOS
+The prototypes were initially developed on Windows without WSL. Linux native
+checks now run on the project owner’s Fedora desktop in isolated namespaces. macOS
 SDK, deployment, and packet checks still need a Mac. Platform reports record
 exactly which checks ran and which remain.
 
