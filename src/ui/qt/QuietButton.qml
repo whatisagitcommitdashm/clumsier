@@ -9,6 +9,8 @@ Button {
     property bool selected: false
     property bool accentText: false
     property bool alignLeft: false
+    property string helpText: ""
+    QuietHint { objectName: "hint-" + control.objectName; theme: control.theme; text: control.helpText; visible: text !== "" && control.pointerInside && !control.down && !!control.Window.window && control.Window.window.active }
     hoverEnabled: false
     // Track the pointer separately from the button's press/focus state. Rows
     // should stop looking hovered when the pointer leaves, even after a click.

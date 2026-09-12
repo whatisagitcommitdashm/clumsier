@@ -4,6 +4,7 @@
 #include <QTimer>
 #include "window_chrome.h"
 #include "hud_stacking.h"
+#include "text_focus.h"
 #if defined(Q_OS_WIN) || defined(Q_OS_LINUX)
 #include "app_bridge.h"
 #endif
@@ -57,6 +58,7 @@ int main(int argc, char *argv[])
     engine.loadFromModule("Clumsier.Preview", "Main");
     if (engine.rootObjects().isEmpty()) return 1;
     WindowChrome chrome(qobject_cast<QQuickWindow *>(engine.rootObjects().first()));
+    TextFocus textFocus(qobject_cast<QQuickWindow *>(engine.rootObjects().first()));
     auto *hud = engine.rootObjects().first()->findChild<QQuickWindow *>("clumsierHud");
     std::unique_ptr<HudStacking> hudStacking;
     if (hud) hudStacking = std::make_unique<HudStacking>(hud);

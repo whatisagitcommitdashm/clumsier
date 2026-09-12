@@ -7,6 +7,9 @@
 #include <QFileInfo>
 #include <QSettings>
 #include <QTimer>
+#include <QDir>
+#include <QUuid>
+#include <QRegularExpression>
 #include <algorithm>
 extern "C" {
 #include "core/controller.h"
@@ -34,6 +37,9 @@ struct AppBridge::Data {
     bool ready = true, sequenceStale = false;
     int quickMs = 0, quickDirection = 0;
     QString associationsPath;
+    QString preferencesPath;
+    bool hotkeysEnabled = true, autoSave = false, inputSuspended = false;
+    QTimer *saveTimer = nullptr;
 };
 AppBridge *AppBridge::listenerOwner = nullptr;
 
@@ -61,6 +67,10 @@ AppBridge::AppBridge(NetworkBackend backend, const QString &root, bool enableHot
     if (!d->opened) fail(QString::fromUtf8(error));
     else {
         d->associationsPath = QString::fromWCharArray(d->store.root) + "/sequence-servers.ini";
+        d->preferencesPath = QString::fromWCharArray(d->store.root) + "/preferences.ini";
+        QSettings preferences(d->preferencesPath, QSettings::IniFormat);
+        d->hotkeysEnabled = preferences.value("hotkeysEnabled", true).toBool();
+        d->autoSave = preferences.value("autoSave", false).toBool();
         refresh();
     }
 #ifdef Q_OS_WIN
@@ -78,12 +88,17 @@ AppBridge::AppBridge(NetworkBackend backend, const QString &root, bool enableHot
         if (!pathReady || !hotkeyLoad(d->keyPath, &d->keys, error))
             fail(QString::fromUtf8(error));
         listenerOwner = this;
-        d->listening = hotkeysOpen([](AppAction action) { if (listenerOwner) listenerOwner->execute(int(action)); }, error);
+        d->listening = hotkeysOpen([](AppAction action) { if (listenerOwner) listenerOwner->executeHotkey(int(action)); }, error);
         if (!d->listening || !hotkeysApply(&d->keys, nullptr, error)) fail(QString::fromUtf8(error));
+        updateHotkeyPause();
     }
 #else
     Q_UNUSED(enableHotkeys);
 #endif
+    d->saveTimer = new QTimer(this);
+    d->saveTimer->setSingleShot(true);
+    d->saveTimer->setInterval(500);
+    connect(d->saveTimer, &QTimer::timeout, this, [this] { if (d->autoSave && dirty()) save(); });
     // Read backend state rather than assuming a successful button click means
     // capture is still running. This also surfaces changes from global hotkeys.
     auto *timer = new QTimer(this);
@@ -173,8 +188,14 @@ bool AppBridge::newPreset() {
     d->profile.clear();
     d->id.clear(); d->saved.clear(); d->draft = toMap(preset); prepareSequence(); emit draftChanged(); return true;
 }
-void AppBridge::updateDraft(const QVariantMap &value) { d->draft = value; emit draftChanged(); emit stateChanged(); }
+void AppBridge::updateDraft(const QVariantMap &value) {
+    d->draft = value; emit draftChanged(); emit stateChanged();
+    // Wait for a pause in typing. Invalid drafts remain visible and never
+    // replace the last saved version; Save reports the validation error.
+    if (d->autoSave) d->saveTimer->start();
+}
 bool AppBridge::save() {
+    if (d->saveTimer) d->saveTimer->stop();
     Preset preset{}; char error[NETWORK_ERROR_SIZE]{}; wchar_t id[LIBRARY_ID_SIZE]{};
     if (!d->opened) return fail("The library is unavailable.");
     if (!fromMap(d->draft, &preset, error)) return fail(QString::fromUtf8(error));
@@ -248,6 +269,65 @@ bool AppBridge::saveProfile(const QString &id, const QString &name, int baseline
     if (!profileStoreSave(&d->store, storedId, &profile, error)) return fail(QString::fromUtf8(error));
     const bool selected = selectProfile(QString::fromWCharArray(storedId));
     refresh(); return selected;
+}
+bool AppBridge::batchSequences(const QString &operation, const QStringList &requested, const QUrl &folder) {
+    if (dirty()) return fail("Save or discard your edits before changing the selection.");
+    if (!d->opened) return fail("The library is unavailable.");
+    if (operation != "delete" && operation != "duplicate" && operation != "export") return fail("Unknown sequence action.");
+    QStringList ids = requested; ids.removeDuplicates();
+    if (ids.isEmpty()) return fail("Select at least one sequence.");
+    if (operation == "export" && (!folder.isLocalFile() || !QDir(folder.toLocalFile()).exists()))
+        return fail("Choose an existing export folder.");
+    // Validate the entire selection before changing files. Store reads validate
+    // IDs as well, so a context-menu argument cannot escape the library.
+    QList<Preset> presets;
+    char error[NETWORK_ERROR_SIZE]{};
+    for (const auto &id : ids) {
+        Preset preset{};
+        if (!presetStoreRead(&d->store, wide(id).c_str(), &preset, error)) return fail(QString::fromUtf8(error));
+        presets.append(preset);
+    }
+    if (operation == "duplicate" && d->presets.size() + ids.size() > LIBRARY_MAX_ITEMS)
+        return fail("There is not enough room in the sequence library for these copies.");
+    QSettings associations(d->associationsPath, QSettings::IniFormat);
+    int completed = 0;
+    for (int i = 0; i < ids.size(); ++i) {
+        bool success = false;
+        if (operation == "delete") {
+            success = presetStoreDelete(&d->store, false, wide(ids[i]).c_str(), error);
+            if (success) {
+                associations.remove("servers/" + ids[i]);
+                if (ids[i] == d->id) {
+                    if (d->activity == "sequences") controllerShutdown(&d->controller);
+                    d->id.clear(); d->saved.clear(); d->draft.clear(); d->profile.clear();
+                    if (d->activity == "sequences") prepareSequence();
+                }
+            }
+        } else if (operation == "duplicate") {
+            auto copy = presets[i];
+            QString name = QString::fromUtf8(copy.name);
+            while ((name + " copy").toUtf8().size() >= PRESET_NAME_SIZE) name.chop(1);
+            const auto utf8 = (name + " copy").toUtf8();
+            memset(copy.name, 0, sizeof(copy.name)); memcpy(copy.name, utf8.constData(), utf8.size());
+            wchar_t newId[LIBRARY_ID_SIZE]{};
+            success = presetStoreSave(&d->store, newId, &copy, error);
+            if (success) associations.setValue("servers/" + QString::fromWCharArray(newId), associations.value("servers/" + ids[i]));
+        } else {
+            QString name = QString::fromUtf8(presets[i].name);
+            name.replace(QRegularExpression("[^a-zA-Z0-9_-]+"), "-");
+            // Unique suffixes keep repeated exports from overwriting files.
+            name = name.left(60) + "-" + QUuid::createUuid().toString(QUuid::WithoutBraces) + ".json";
+            success = presetFileWrite(wide(QDir(folder.toLocalFile()).filePath(name)).c_str(), &presets[i], error);
+        }
+        if (!success) {
+            associations.sync(); refresh(); emit draftChanged(); emit stateChanged();
+            return fail(QString("Completed %1 of %2 sequences. %3").arg(completed).arg(ids.size()).arg(QString::fromUtf8(error)));
+        }
+        ++completed;
+    }
+    associations.sync(); refresh(); emit draftChanged(); emit stateChanged();
+    if (associations.status() != QSettings::NoError) return fail("Sequence files were updated, but server associations could not be saved.");
+    clearError(); return true;
 }
 bool AppBridge::deleteProfile(const QString &id) {
     char error[NETWORK_ERROR_SIZE]{};
@@ -364,11 +444,44 @@ QVariantList AppBridge::bindings() const {
     return result;
 }
 void AppBridge::setInputPaused(bool paused) {
-    if (!d->listening || d->paused == paused) return;
+    if (d->paused == paused) return;
     d->paused = paused;
+    updateHotkeyPause();
+}
+void AppBridge::updateHotkeyPause() {
+    const bool suspend = d->paused || !d->hotkeysEnabled;
+    if (!d->listening || suspend == d->inputSuspended) return;
+    // The native listener counts nested pauses. Own exactly one pause here,
+    // regardless of how many UI reasons currently need shortcuts suspended.
 #ifdef Q_OS_WIN
-    if (paused) hotkeysPause(); else hotkeysResume();
+    if (suspend) hotkeysPause(); else hotkeysResume();
 #endif
+    d->inputSuspended = suspend;
+}
+bool AppBridge::hotkeysEnabled() const { return d->hotkeysEnabled; }
+bool AppBridge::autoSave() const { return d->autoSave; }
+bool AppBridge::savePreference(const QString &key, bool value) {
+    if (!d->opened) return fail("The settings folder is unavailable.");
+    QSettings preferences(d->preferencesPath, QSettings::IniFormat);
+    preferences.setValue(key, value); preferences.sync();
+    return preferences.status() == QSettings::NoError || fail("Could not save your preference.");
+}
+void AppBridge::setHotkeysEnabled(bool enabled) {
+    if (d->hotkeysEnabled == enabled || !savePreference("hotkeysEnabled", enabled)) return;
+    d->hotkeysEnabled = enabled;
+    updateHotkeyPause();
+    emit preferencesChanged();
+}
+void AppBridge::setAutoSave(bool enabled) {
+    if (d->autoSave == enabled || !savePreference("autoSave", enabled)) return;
+    d->autoSave = enabled;
+    if (enabled && dirty()) d->saveTimer->start(); else d->saveTimer->stop();
+    emit preferencesChanged();
+}
+bool AppBridge::executeHotkey(int action) {
+    // Recheck queued callbacks too. Disabling shortcuts must never disable
+    // the mouse controls or allow a previously queued key event through.
+    return d->hotkeysEnabled && !d->paused && execute(action);
 }
 void AppBridge::recordBinding(int action) {
     if (!d->listening || action < 0 || action >= ACTION_COUNT) { fail("Global hotkeys are unavailable."); return; }

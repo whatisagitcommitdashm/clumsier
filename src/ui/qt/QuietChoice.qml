@@ -37,6 +37,8 @@ ComboBox {
         }
     }
     popup: Popup {
+        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: control.theme.reducedMotion ? 0 : 90; easing.type: Easing.OutCubic } }
+        exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: control.theme.reducedMotion ? 0 : 70 } }
         y: control.height + 4
         width: control.width
         padding: 4

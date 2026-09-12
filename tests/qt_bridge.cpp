@@ -11,6 +11,7 @@
 #include <QSettings>
 #include <QProcess>
 #include <QTimer>
+#include <QJSValue>
 #include <functional>
 #ifdef Q_OS_WIN
 #define WIN32_LEAN_AND_MEAN
@@ -18,6 +19,7 @@
 #endif
 #include "app_bridge.h"
 #include "hud_stacking.h"
+#include "text_focus.h"
 
 struct FakeNetwork {
     bool running = false, reject = false;
@@ -72,6 +74,46 @@ int main(int argc, char **argv) {
     bool ok = true;
     auto check = [&](bool success, const char *message) { if (!success) { qCritical("FAIL: %s", message); ok = false; } };
     QString savedId, savedServerId;
+    {
+        QTemporaryDir features;
+        QString original;
+        {
+            FakeNetwork capture;
+            AppBridge bridge(capture.backend(), features.path(), false);
+            bridge.setHotkeysEnabled(false);
+            check(!bridge.executeHotkey(0) && !capture.running, "Disabled hotkeys cannot start capture");
+            check(bridge.execute(0) && capture.running && bridge.execute(1), "Mouse actions still work with hotkeys off");
+            bridge.setInputPaused(true); bridge.setHotkeysEnabled(true);
+            check(!bridge.executeHotkey(0), "Enabling hotkeys does not override text-input pause");
+            bridge.setInputPaused(false);
+            check(bridge.executeHotkey(0) && bridge.execute(1), "Hotkeys resume when enabled and not editing");
+            bridge.setHotkeysEnabled(false);
+            bridge.setAutoSave(true);
+            bridge.newPreset();
+            auto draft = bridge.draft(); draft["name"] = "Auto saved"; bridge.updateDraft(draft);
+            check(QTest::qWaitFor([&] { return !bridge.dirty(); }, 1500), "Autosave persists a valid draft");
+            original = bridge.selectedId();
+            draft = bridge.draft(); draft["name"] = ""; bridge.updateDraft(draft); QTest::qWait(650);
+            check(bridge.dirty() && !bridge.error().isEmpty(), "Invalid autosave preserves draft with validation error");
+            bridge.discard();
+            check(bridge.draft()["name"] == "Auto saved", "Invalid autosave does not replace saved data");
+            check(bridge.saveProfile("", "Batch server", 45), "Associate server before batch copy");
+            const auto server = bridge.profileId();
+            check(!bridge.batchSequences("delete", {original, "invalid"}) && bridge.presets().size() == 1, "Batch validates all IDs before deleting anything");
+            check(bridge.batchSequences("duplicate", {original}) && bridge.presets().size() == 2, "Batch duplicate writes a saved copy");
+            QStringList ids;
+            for (const auto &entry : bridge.presets()) ids.append(entry.toMap()["id"].toString());
+            for (const auto &id : ids) check(bridge.selectPreset(id) && bridge.profileId() == server, "Batch copies retain server association");
+            QTemporaryDir exports;
+            check(bridge.batchSequences("export", ids, QUrl::fromLocalFile(exports.path())), "Batch export writes each selection");
+            check(bridge.batchSequences("export", ids, QUrl::fromLocalFile(exports.path())) && QDir(exports.path()).entryList({"*.json"}, QDir::Files).size() == 4, "Repeated batch exports never overwrite files");
+            check(bridge.execute(0), "Start selected sequence before batch deletion");
+            check(bridge.batchSequences("delete", ids) && bridge.presets().isEmpty() && !capture.running && !bridge.state()["canStart"].toBool(), "Deleting active selection stops capture and clears readiness");
+        }
+        FakeNetwork capture;
+        AppBridge reopened(capture.backend(), features.path(), false);
+        check(!reopened.hotkeysEnabled() && reopened.autoSave(), "Hotkey and autosave preferences survive restart");
+    }
     {
         AppBridge switching(network.backend(), library.path(), false);
         check(switching.quickDelay(42, 0) && switching.execute(0), "Start quick delay before switching");
@@ -151,6 +193,7 @@ int main(int argc, char **argv) {
         if (!engine.rootObjects().isEmpty()) {
             auto *window = engine.rootObjects().first();
             auto *quickWindow = qobject_cast<QQuickWindow *>(window);
+            TextFocus textFocus(quickWindow);
             std::function<QQuickItem *(QQuickItem *, const QString &)> find;
             find = [&](QQuickItem *item, const QString &name) -> QQuickItem * {
                 if (item->objectName() == name) return item;
@@ -234,6 +277,14 @@ int main(int argc, char **argv) {
             auto *quickField = find(quickWindow->contentItem(), "quickDelayField");
             check(quickField != nullptr, "Quick delay editor exists");
             if (quickField) {
+                click("quickDelayField");
+                check(quickField->hasActiveFocus(), "Click enters quick delay editing");
+                QTest::mouseClick(quickWindow, Qt::LeftButton, Qt::NoModifier, QPoint(700, 500));
+                check(!quickField->hasActiveFocus(), "Blank-space click exits unchanged text field");
+                click("quickDelayField");
+                check(quickField->hasActiveFocus(), "Click re-enters unchanged text field");
+                QTest::keyClick(quickWindow, Qt::Key_Escape);
+                check(!quickField->hasActiveFocus(), "Escape exits text editing");
                 quickField->forceActiveFocus(); QTest::keyClick(quickWindow, Qt::Key_A, Qt::ControlModifier);
                 QTest::keyClick(quickWindow, Qt::Key_2); QTest::qWait(450);
                 check(quickField->property("text") == "2", "Status polling preserves partially typed number");
@@ -269,6 +320,7 @@ int main(int argc, char **argv) {
             auto *hud = window->findChild<QQuickWindow *>("clumsierHud");
             check(hud && hud->isVisible() && hud->transientParent() == nullptr, "HUD is an independent visible window");
             if (hud) {
+                if (qEnvironmentVariableIsSet("CLUMSIER_SCREENSHOTS")) hud->grabWindow().save(qEnvironmentVariable("CLUMSIER_SCREENSHOTS") + "/hud-quick.png");
                 HudStacking stacking(hud);
                 check(hud->flags().testFlag(Qt::WindowStaysOnTopHint) && hud->flags().testFlag(Qt::WindowDoesNotAcceptFocus), "HUD requests topmost non-focus window");
 #ifdef Q_OS_WIN
@@ -382,6 +434,17 @@ int main(int argc, char **argv) {
             check(bridge.selectPreset(copyId) && bridge.deletePreset() && bridge.selectPreset(savedId), "Remove switching-test copy");
             window->setProperty("page", "settings"); QTest::qWait(200);
             click("advancedModeSetting");
+            auto *advanced = find(quickWindow->contentItem(), "advancedModeSetting");
+            if (advanced) {
+                quickWindow->requestActivate();
+                QTest::mouseMove(quickWindow, advanced->mapToScene(QPointF(30, advanced->height()/2)).toPoint());
+                QTest::qWait(550);
+                auto *hint = window->findChild<QObject *>("hint-advancedModeSetting");
+                if (quickWindow->isActive()) check(hint && hint->property("visible").toBool(), "Settings hover shows a themed explanation");
+                if (qEnvironmentVariableIsSet("CLUMSIER_SCREENSHOTS")) quickWindow->grabWindow().save(qEnvironmentVariable("CLUMSIER_SCREENSHOTS") + "/setting-hint.png");
+                QTest::mouseMove(quickWindow, QPoint(1000, 200)); QTest::qWait(200);
+                check(hint && !hint->property("visible").toBool(), "Settings explanation disappears on pointer leave");
+            }
             QSettings advancedSettings(library.filePath("ui.ini"), QSettings::IniFormat);
             check(advancedSettings.value("shell/advancedMode").toBool(), "Advanced preference saved");
             window->setProperty("page", "sequences"); QTest::qWait(100);
@@ -403,6 +466,49 @@ int main(int argc, char **argv) {
                     quickWindow->grabWindow().save(directory + "/live-" + page + ".png");
                 }
             }
+            window->setProperty("page", "sequences"); QTest::qWait(100);
+            click("renameSequenceButton");
+            nameField = find(quickWindow->contentItem(), "sequenceNameField");
+            check(nameField && nameField->hasActiveFocus(), "Rename button focuses the sequence title");
+            QTest::mouseClick(quickWindow, Qt::LeftButton, Qt::NoModifier, QPoint(1100, 580));
+            check(nameField && !nameField->hasActiveFocus() && !bridge.dirty(), "Clicking away from unchanged name ends editing without dirtying draft");
+            for (int i = 0; i < 4; ++i) {
+                QStringList ids;
+                for (const auto &entry : bridge.presets()) ids.append(entry.toMap()["id"].toString());
+                check(bridge.batchSequences("duplicate", ids), "Populate a scrollable test library");
+            }
+            QTest::qWait(150);
+            auto *list = find(quickWindow->contentItem(), "sequenceList");
+            check(list && list->property("contentHeight").toReal() > list->height(), "Long sequence list has scrollable content");
+            if (list) {
+                list->setProperty("contentY", 150); QTest::qWait(50);
+                check(list->property("contentY").toReal() > 0, "Sequence list scrolls independently");
+                list->setProperty("contentY", 0); QTest::qWait(100);
+            }
+            const auto firstCopy = bridge.presets()[1].toMap()["id"].toString();
+            const auto thirdCopy = bridge.presets()[3].toMap()["id"].toString();
+            auto rowClick = [&](const QString &id, Qt::MouseButton button, Qt::KeyboardModifiers modifiers) {
+                auto *row = find(quickWindow->contentItem(), "sequence-" + id);
+                check(row != nullptr, "Sequence row exists for mouse selection");
+                if (row) QTest::mouseClick(quickWindow, button, modifiers, row->mapToScene(QPointF(45, row->height()/2)).toPoint());
+                QTest::qWait(100);
+            };
+            rowClick(firstCopy, Qt::LeftButton, Qt::NoModifier);
+            rowClick(thirdCopy, Qt::LeftButton, Qt::ShiftModifier);
+            const auto selected = window->property("selectedSequenceIds").value<QJSValue>().toVariant().toList();
+            check(selected.size() == 3 && bridge.selectedId() == firstCopy, "Shift click selects range without changing active sequence");
+            rowClick(thirdCopy, Qt::RightButton, Qt::NoModifier);
+            click("context-delete");
+            auto *deleteButton = find(quickWindow->contentItem(), "confirmDeleteSequences");
+            check(deleteButton && deleteButton->isVisible(), "Context delete asks for batch confirmation");
+            if (qEnvironmentVariableIsSet("CLUMSIER_SCREENSHOTS")) quickWindow->grabWindow().save(qEnvironmentVariable("CLUMSIER_SCREENSHOTS") + "/batch-delete.png");
+            click("skipDeleteConfirmation"); click("confirmDeleteSequences");
+            check(bridge.presets().size() == 13 && !bridge.state()["canStart"].toBool(), "Batch delete removes selected range and clears active sequence");
+            QSettings deletionSettings(library.filePath("ui.ini"), QSettings::IniFormat);
+            check(!deletionSettings.value("shell/confirmDeletion", true).toBool(), "Deletion opt-out persists");
+            QStringList copies;
+            for (const auto &entry : bridge.presets()) { const auto id = entry.toMap()["id"].toString(); if (id != savedId) copies.append(id); }
+            check(bridge.batchSequences("delete", copies) && bridge.selectPreset(savedId), "Clean up batch test copies");
         }
         check(!warnings, "Production UI has no QML warnings");
     }
@@ -424,6 +530,7 @@ int main(int argc, char **argv) {
             check(!network.running && window->property("page") == "sequences" && !window->property("switchingActivity").toBool(), "Opt-out survives restart and still stops capture");
             check(reopened.state()["canStart"].toBool() && reopened.state()["expected"] == 200, "Restored server prepares correct sequence after restart");
             auto *quickWindow = qobject_cast<QQuickWindow *>(window);
+            TextFocus textFocus(quickWindow);
             std::function<QQuickItem *(QQuickItem *, const QString &)> find;
             find = [&](QQuickItem *item, const QString &name) -> QQuickItem * {
                 if (item->objectName() == name) return item;

@@ -50,7 +50,7 @@ qt_add_executable(clumsier-ui-preview main.cpp window_chrome.cpp hud_stacking.cp
 qt_add_qml_module(clumsier-ui-preview
     URI Clumsier.Preview
     VERSION 1.0
-    QML_FILES Main.qml Hud.qml Theme.qml QuietButton.qml QuietField.qml QuietCheckBox.qml QuietDialog.qml QuietChoice.qml ThemePicker.qml ThemeCatalog.js TintedThemes.js LiveWorkspace.qml
+    QML_FILES Main.qml Hud.qml Theme.qml QuietButton.qml QuietField.qml QuietCheckBox.qml QuietDialog.qml QuietChoice.qml QuietHint.qml ThemePicker.qml ThemeCatalog.js TintedThemes.js LiveWorkspace.qml
 )
 target_link_libraries(clumsier-ui-preview PRIVATE Qt6::Quick Qt6::QuickControls2)
 if(TARGET clumsier-qt-bridge)

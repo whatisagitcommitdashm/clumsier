@@ -105,16 +105,22 @@ ColumnLayout {
                 Layout.fillWidth: true; visible: panel.steps.length > 0
                 text: panel.draft.name || ""; placeholderText: "Sequence name"
                 font.pixelSize: 26 * panel.theme.scale; readOnly: panel.playing
-                background: Rectangle { color: "transparent"; radius: 5; border.width: sequenceName.activeFocus ? 1 : 0; border.color: panel.theme.border }
+                leftPadding: 0; rightPadding: 8
+                HoverHandler { id: nameHover; blocking: false; cursorShape: sequenceName.readOnly ? Qt.ArrowCursor : Qt.IBeamCursor }
+                background: Rectangle {
+                    color: nameHover.hovered && !sequenceName.readOnly ? panel.theme.hover : "transparent"; radius: 5
+                    Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: panel.theme.accent; visible: sequenceName.activeFocus || (nameHover.hovered && !sequenceName.readOnly) }
+                }
                 onTextEdited: panel.edit("name", text)
             }
+            QuietButton { objectName: "renameSequenceButton"; theme: panel.theme; text: "Rename"; subtle: true; visible: !panel.playing && panel.steps.length > 0; onClicked: { sequenceName.forceActiveFocus(); sequenceName.selectAll(); } }
             Title { visible: !panel.steps.length; text: "No sequence selected" }
             QuietButton { objectName: "editSequenceButton"; theme: panel.theme; text: "Edit"; visible: panel.playing && panel.steps.length > 0; onClicked: panel.switchRequested("edit", "") }
             QuietButton { objectName: "sequenceActionsButton"; theme: panel.theme; text: "···"; Accessible.name: "Sequence actions"; subtle: true; onClicked: actionsDialog.open() }
         }
         RowLayout {
             visible: bridge.dirty; Layout.fillWidth: true
-            Copy { text: "Unsaved changes"; color: panel.theme.accent }
+            Copy { text: bridge.autoSave ? (bridge.error ? "Not saved — check the entry below" : "Saving changes…") : "Unsaved changes"; color: panel.theme.accent }
             QuietButton { objectName: "saveSequenceButton"; theme: panel.theme; text: "Save"; onClicked: bridge.save() }
             QuietButton { objectName: "discardSequenceButton"; theme: panel.theme; text: "Discard"; onClicked: bridge.discard() }
         }
@@ -251,6 +257,12 @@ ColumnLayout {
     ColumnLayout {
         visible: panel.page === "hotkeys"; Layout.fillWidth: true; spacing: 18
         Title { text: "Hotkeys" }
+        QuietCheckBox {
+            visible: bridge.globalHotkeysAvailable; objectName: "hotkeysEnabledToggle"; theme: panel.theme; text: "Enable hotkeys"
+            checked: bridge.hotkeysEnabled; onToggled: bridge.hotkeysEnabled = checked
+            helpText: "Turn global shortcuts on or off. Mouse controls always remain available."
+        }
+        Copy { visible: bridge.globalHotkeysAvailable && !bridge.hotkeysEnabled; text: "Hotkeys are off. You can still use all buttons and edit your bindings." }
         Copy { text: bridge.globalHotkeysAvailable
             ? "Click Record, hold your keyboard or mouse combination, then release. Input still reaches your game. Changes are saved immediately. Global actions pause while you edit text or use this tab."
             : "Global hotkeys are not yet available on Linux. Use the Start, Stop, and sequence playback buttons." }
@@ -328,11 +340,16 @@ ColumnLayout {
     }
     QuietDialog {
         theme: panel.theme
-        id: deleteDialog; parent: Overlay.overlay; anchors.centerIn: parent; modal: true; title: "Delete this " + panel.deleteKind + "?"; standardButtons: Dialog.NoButton
-        footer: RowLayout {
-            Item { Layout.fillWidth: true }
-            QuietButton { theme: panel.theme; text: "Cancel"; onClicked: deleteDialog.reject() }
-            QuietButton { theme: panel.theme; text: "Delete"; onClicked: deleteDialog.accept() }
+        id: deleteDialog; parent: Overlay.overlay; anchors.centerIn: parent; width: Math.min(450 * panel.theme.scale, parent.width - 32); modal: true; title: "Delete this " + panel.deleteKind + "?"; standardButtons: Dialog.NoButton
+        contentItem: ColumnLayout {
+            spacing: 16
+            Copy { text: "Sequences using this server will need a new server selection." }
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                QuietButton { theme: panel.theme; text: "Cancel"; onClicked: deleteDialog.reject() }
+                QuietButton { theme: panel.theme; text: "Delete"; onClicked: deleteDialog.accept() }
+            }
         }
         onAccepted: panel.deleteKind === "sequence" ? bridge.deletePreset() : bridge.deleteProfile(bridge.profileId)
     }

@@ -4,6 +4,9 @@ import QtQuick.Controls
 CheckBox {
     id: control
     required property var theme
+    property string helpText: ""
+    HoverHandler { id: hintHover; blocking: false }
+    QuietHint { objectName: "hint-" + control.objectName; theme: control.theme; text: control.helpText; visible: text !== "" && hintHover.hovered && control.visible && !control.down && !!control.Window.window && control.Window.window.active }
     spacing: 8 * theme.scale
     padding: 4 * theme.scale
     implicitHeight: 28 * theme.scale

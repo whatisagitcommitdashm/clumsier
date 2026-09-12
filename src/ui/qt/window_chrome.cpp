@@ -50,6 +50,10 @@ bool WindowChrome::nativeEventFilter(const QByteArray &, void *message, qintptr 
     auto *event = static_cast<MSG *>(message);
     // Never call winId() here: during destruction it can recreate the window.
     if (event->hwnd != reinterpret_cast<HWND>(handle_)) return false;
+    if (event->message == WM_NCLBUTTONDBLCLK && event->wParam == HTCAPTION) {
+        *result = 0;
+        return true;
+    }
     if (event->message == WM_NCCALCSIZE && event->wParam) {
         // The normal client fills the entire window. On maximize, use the work
         // area: treating the whole monitor as client can hide the taskbar and

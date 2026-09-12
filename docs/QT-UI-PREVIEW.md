@@ -36,6 +36,8 @@ Saved Windows hotkeys are loaded through the existing adapter (default toggle: F
 The Hotkeys tab records keyboard/mouse chords and saves validated changes immediately.
 Original input continues to the game. Actions pause while typing into a field,
 using a dialog/theme picker, or working in the focused Hotkeys tab.
+The **Enable hotkeys** checkbox turns global playback shortcuts off without
+affecting mouse controls or binding editing. This preference survives restarts.
 
 Sequences and server profiles share `%LOCALAPPDATA%\Clumsier` with the IUP app.
 Save/Discard controls appear while the sequence has unsaved changes. Navigating
@@ -45,6 +47,33 @@ Duplicate creates a new draft; import validates JSON and saves a separate entry.
 While playing, the sequence fields are read-only and step clicks remain live.
 Choose Edit to stop through the existing confirmation before changing anything.
 Saving while stopped prepares the sequence immediately for the next Start.
+
+Settings includes **Autosave sequences** (off by default). Valid edits save
+after a 500 ms pause; incomplete or invalid entries stay editable and display
+the validation error. Navigation flushes a pending save before switching.
+Hotkey and autosave preferences live in `preferences.ini` beside the library.
+
+The sequence list scrolls independently. Shift-click selects a range; Ctrl-click
+adds or removes individual selections. These group selections do not change the
+active delay. Right-click offers Delete, Duplicate, and Export for the selection.
+Context-menu copies are saved immediately and inherit local server associations.
+Export asks for a folder and creates separate, uniquely named JSON files without
+overwriting previous exports. Batch operations validate all selected files first;
+if a later disk operation fails, the error reports how many files were completed.
+
+Deletion confirms by default, with a **Don’t ask me again** checkbox. Settings
+can restore that confirmation at any time. Deleting an active sequence stops it
+and clears Start readiness; deletion never starts a different sequence.
+
+Click a sequence title or **Rename** to edit it. The title aligns with the server
+summary and highlights on hover. Clicking outside a text field, Enter, or Escape
+ends editing. Settings controls show brief themed hover explanations. Dropdowns
+fade quickly; Reduce motion removes these transitions. Double-clicking the header
+does not maximize the app; use the window button instead.
+
+The quick-control HUD ends with its delay values and Start/Stop button on the
+same row. Sequence HUD navigation uses closer spacing. HUD controls remain
+optional, and hiding them never disables mouse controls in the main window.
 
 Quick Controls and Sequences select what Start activates. Switching between them,
 or selecting another sequence, stops capture. A confirmation appears before
@@ -96,6 +125,12 @@ scripts\test-qt-preview.cmd
 ```
 
 Set `CLUMSIER_QT_ROOT` to the kit directory to use a different SDK installation.
+For a separate shareable Windows build, run `scripts\build-pre-beta.cmd`.
+It uses `build/pre-beta` and deploys `bin/pre-beta/clumsier-pre-beta.exe`
+with its dependencies, leaving the preview build and tests untouched. Zip the
+entire `bin/pre-beta` folder to share it. This uses the same local settings and
+sequence library as the preview when run on the same Windows account.
+
 The build script selects the existing Visual Studio compiler, builds in Release
 mode, and deploys the Qt DLLs/QML imports beside the executable. No Python runtime
 is involved. The SDK and generated binaries remain ignored by Git.

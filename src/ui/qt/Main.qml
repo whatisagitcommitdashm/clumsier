@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Shapes
 import QtCore
+import QtQuick.Dialogs
 import "ThemeCatalog.js" as Catalog
 
 ApplicationWindow {
@@ -16,7 +17,7 @@ ApplicationWindow {
     flags: Qt.Window | Qt.FramelessWindowHint | Qt.WindowMinMaxButtonsHint | Qt.WindowCloseButtonHint
     title: backend ? "Clumsier" : "Clumsier — UI prototype"
     property var backend: null
-    readonly property bool inputPaused: switchDialog.visible || unsavedDialog.visible || themePicker.visible || (active && (page === "hotkeys" || !!activeFocusItem && (activeFocusItem instanceof TextInput || activeFocusItem instanceof TextEdit))) || (liveLoader.item ? liveLoader.item.dialogOpen : false)
+    readonly property bool inputPaused: sequenceMenu.visible || deleteSequencesDialog.visible || batchExport.visible || switchDialog.visible || unsavedDialog.visible || themePicker.visible || (active && (page === "hotkeys" || !!activeFocusItem && (activeFocusItem instanceof TextInput || activeFocusItem instanceof TextEdit))) || (liveLoader.item ? liveLoader.item.dialogOpen : false)
     onInputPausedChanged: if (backend) backend.setInputPaused(inputPaused)
     onClosing: function(event) {
         if (backend && backend.dirty) {
@@ -88,6 +89,7 @@ ApplicationWindow {
         property real hudScale: 1
         property real hudOpacity: 0.85
         property bool hudControls: true
+        property bool confirmDeletion: true
     }
     function saveHudPreference(key, value) {
         preferences[key] = value;
@@ -105,6 +107,87 @@ ApplicationWindow {
     property string page: "sequences"
     property string pendingSwitch: ""
     property string pendingValue: ""
+    property var selectedSequenceIds: []
+    property string selectionAnchor: ""
+    property var batchIds: []
+    function chooseSequence(id, modifiers) {
+        const ids = backend.presets.map(function(p) { return p.id; });
+        if ((modifiers & Qt.ShiftModifier) && ids.includes(selectionAnchor)) {
+            const a = ids.indexOf(selectionAnchor), b = ids.indexOf(id);
+            selectedSequenceIds = ids.slice(Math.min(a, b), Math.max(a, b) + 1);
+        } else if (modifiers & Qt.ControlModifier) {
+            selectedSequenceIds = selectedSequenceIds.includes(id) ? selectedSequenceIds.filter(function(v) { return v !== id; }) : selectedSequenceIds.concat([id]);
+            selectionAnchor = id;
+        } else {
+            selectedSequenceIds = [id]; selectionAnchor = id;
+            requestSwitch("sequence", id);
+        }
+    }
+    function openSequenceMenu(id, item, x, y) {
+        if (!selectedSequenceIds.includes(id)) { selectedSequenceIds = [id]; selectionAnchor = id; }
+        const p = item.mapToItem(window.contentItem, x, y);
+        sequenceMenu.x = Math.min(p.x, window.width - sequenceMenu.width - 12);
+        sequenceMenu.y = Math.min(p.y, window.height - sequenceMenu.implicitHeight - 12);
+        sequenceMenu.open();
+    }
+    function confirmSequenceDeletion() {
+        if (!preferences.confirmDeletion) { backend.batchSequences("delete", batchIds); return; }
+        skipDeleteConfirmation.checked = false; deleteSequencesDialog.open();
+    }
+    Connections {
+        target: window.backend
+        function onLibraryChanged() {
+            const ids = backend.presets.map(function(p) { return p.id; });
+            selectedSequenceIds = selectedSequenceIds.filter(function(id) { return ids.includes(id); });
+        }
+    }
+    Popup {
+        id: sequenceMenu; objectName: "sequenceContextMenu"; parent: Overlay.overlay
+        width: 220 * appTheme.scale; padding: 6; modal: false; focus: true
+        background: Rectangle { color: appTheme.surface; border.color: appTheme.border; radius: 7 }
+        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: appTheme.reducedMotion ? 0 : 90 } }
+        contentItem: ColumnLayout {
+            spacing: 2
+            Repeater {
+                model: ["duplicate", "export", "delete"]
+                QuietButton {
+                    required property string modelData
+                    objectName: "context-" + modelData; theme: appTheme; Layout.fillWidth: true; alignLeft: true; subtle: true
+                    text: modelData[0].toUpperCase() + modelData.slice(1) + (selectedSequenceIds.length > 1 ? " " + selectedSequenceIds.length + " sequences" : " sequence")
+                    onClicked: { sequenceMenu.close(); requestSwitch("batch-" + modelData, JSON.stringify(selectedSequenceIds)); }
+                }
+            }
+        }
+    }
+    FolderDialog {
+        id: batchExport; title: "Export selected sequences to folder"
+        onAccepted: if (backend.batchSequences("export", batchIds, selectedFolder)) window.inform("Exported " + batchIds.length + " sequence(s).");
+    }
+    QuietDialog {
+        id: deleteSequencesDialog; objectName: "deleteSequencesDialog"; theme: appTheme; parent: Overlay.overlay; anchors.centerIn: parent
+        width: Math.min(470 * appTheme.scale, parent.width - 32); modal: true; closePolicy: Popup.CloseOnEscape
+        title: batchIds.length > 1 ? "Delete " + batchIds.length + " sequences?" : "Delete this sequence?"
+        contentItem: ColumnLayout {
+            spacing: 16
+            Caption { Layout.fillWidth: true; text: "The selected sequences will be removed from your library. Export a copy first if you want to keep them." }
+            QuietCheckBox { id: skipDeleteConfirmation; objectName: "skipDeleteConfirmation"; theme: appTheme; text: "Don’t ask me again"; Layout.fillWidth: true }
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                QuietButton { theme: appTheme; text: "Cancel"; onClicked: deleteSequencesDialog.reject() }
+                QuietButton {
+                    objectName: "confirmDeleteSequences"; theme: appTheme; text: "Delete"
+                    onClicked: {
+                        if (backend.batchSequences("delete", batchIds)) {
+                            if (skipDeleteConfirmation.checked) window.saveHudPreference("confirmDeletion", false);
+                            deleteSequencesDialog.close();
+                        }
+                    }
+                }
+            }
+            Caption { text: backend ? backend.error : ""; visible: text !== ""; Layout.fillWidth: true; color: appTheme.accent }
+        }
+    }
     readonly property bool switchingActivity: switchDialog.visible
     function clearPendingSwitch() { pendingSwitch = ""; pendingValue = ""; }
     function requestSwitch(kind, value) {
@@ -116,12 +199,13 @@ ApplicationWindow {
         closeSidebar();
         // Resolve the draft before changing pages or replacing the selection.
         // Entering the editor itself does not discard or replace anything.
+        if (backend.autoSave && backend.dirty && kind !== "edit") backend.save();
         if (backend.dirty && kind !== "edit") unsavedDialog.open();
         else continueSwitch();
     }
     function continueSwitch() {
-        const changesActivity = pendingSwitch !== "page"
-            || (pendingValue !== "hotkeys" && pendingValue !== "settings" && pendingValue !== backend.state.activity);
+        const changesActivity = pendingSwitch !== "batch-duplicate" && pendingSwitch !== "batch-export" && (pendingSwitch !== "page"
+            || (pendingValue !== "hotkeys" && pendingValue !== "settings" && pendingValue !== backend.state.activity));
         if (backend.state.running && changesActivity && !preferences.skipSwitchWarning) {
             suppressSwitchWarning.checked = false;
             switchDialog.open();
@@ -135,10 +219,15 @@ ApplicationWindow {
         else if (kind === "new") changed = backend.newPreset();
         else if (kind === "duplicate") changed = backend.duplicate();
         else if (kind === "import") changed = backend.importPreset(value);
+        else if (kind === "batch-duplicate") backend.batchSequences("duplicate", JSON.parse(value));
+        else if (kind === "batch-export") { batchIds = JSON.parse(value); batchExport.open(); }
+        else if (kind === "batch-delete") {
+            if (backend.execute(1)) { batchIds = JSON.parse(value); confirmSequenceDeletion(); }
+        }
         else if (kind === "edit" || kind === "delete") {
             if (backend.execute(1) && liveLoader.item) {
                 if (kind === "edit") liveLoader.item.beginEditing(value);
-                else liveLoader.item.confirmDeleteSequence();
+                else { batchIds = [backend.selectedId]; confirmSequenceDeletion(); }
             }
         }
         clearPendingSwitch();
@@ -277,15 +366,14 @@ ApplicationWindow {
             }
         }
     }
-    Shortcut { enabled: !themePicker.visible && !switchDialog.visible && !unsavedDialog.visible && !(liveLoader.item && liveLoader.item.dialogOpen); sequence: "Escape"; onActivated: closeSidebar() }
+    Shortcut { enabled: !themePicker.visible && !switchDialog.visible && !unsavedDialog.visible && !(liveLoader.item && liveLoader.item.dialogOpen); sequence: "Escape"; onActivated: { window.contentItem.forceActiveFocus(); closeSidebar(); } }
 
     // Let the OS perform moving/resizing, including screen-edge snapping.
     MouseArea {
         anchors.top: parent.top; width: parent.width; height: header.height
         onPressed: window.startSystemMove()
-        onDoubleClicked: window.toggleMaximized()
+        onDoubleClicked: function(mouse) { mouse.accepted = true; }
     }
-
     component Caption: Label {
         color: appTheme.muted
         font.family: appTheme.family
@@ -549,46 +637,56 @@ ApplicationWindow {
                             visible: page === "settings"
                             Layout.fillWidth: true; Layout.leftMargin: 32; Layout.rightMargin: 32
                             spacing: 20
-                            Heading { text: "Make room for what matters."; Layout.fillWidth: true }
-                            Caption { text: "These preferences are saved separately for the UI prototype."; Layout.fillWidth: true }
-                            QuietButton { theme: appTheme; text: (preferences.compactSidebar ? "✓ " : "  ") + "Compact sequence list"; selected: preferences.compactSidebar; onClicked: { preferences.compactSidebar = !preferences.compactSidebar; closeSidebar() } }
+                            Heading { text: "Settings"; Layout.fillWidth: true }
+                            Caption { text: "Make Clumsier work the way you like. Changes are saved automatically."; Layout.fillWidth: true }
+                            QuietButton { theme: appTheme; text: (preferences.compactSidebar ? "✓ " : "  ") + "Compact sequence list"; helpText: "Hide the list until you hover along the left edge. Pin it open again with the panel button."; selected: preferences.compactSidebar; onClicked: { preferences.compactSidebar = !preferences.compactSidebar; closeSidebar() } }
                             Caption { text: "In compact mode, move to the left edge to reveal the list. Ctrl+B also opens it."; Layout.fillWidth: true }
-                            QuietButton { theme: appTheme; text: (preferences.showHints ? "✓ " : "  ") + "Show bottom hints"; selected: preferences.showHints; onClicked: preferences.showHints = !preferences.showHints }
-                            QuietButton { theme: appTheme; text: (preferences.reducedMotion ? "✓ " : "  ") + "Reduce motion"; selected: preferences.reducedMotion; onClicked: preferences.reducedMotion = !preferences.reducedMotion }
+                            QuietButton { theme: appTheme; text: (preferences.showHints ? "✓ " : "  ") + "Show bottom hints"; helpText: "Show the theme name and shortcut reminder along the bottom of the window."; selected: preferences.showHints; onClicked: preferences.showHints = !preferences.showHints }
+                            QuietButton { theme: appTheme; text: (preferences.reducedMotion ? "✓ " : "  ") + "Reduce motion"; helpText: "Skip movement and shorten transitions throughout the interface."; selected: preferences.reducedMotion; onClicked: preferences.reducedMotion = !preferences.reducedMotion }
                             QuietCheckBox {
-                                objectName: "advancedModeSetting"; theme: appTheme; text: "Advanced mode"; checked: preferences.advancedMode
+                                objectName: "advancedModeSetting"; theme: appTheme; text: "Advanced mode"; helpText: "Expose protocol, direction, address, port, and Windows filter controls for sequences."; checked: preferences.advancedMode
                                 onToggled: { preferences.advancedMode = checked; preferences.setValue("advancedMode", checked); preferences.sync(); }
                             }
                             QuietCheckBox {
-                                objectName: "switchWarningSetting"; theme: appTheme; text: "Confirm before switching a running activity"; checked: !preferences.skipSwitchWarning
+                                objectName: "switchWarningSetting"; theme: appTheme; text: "Confirm before switching a running activity"; helpText: "Ask before stopping a running delay to change pages, sequences, or edit settings."; checked: !preferences.skipSwitchWarning
                                 onToggled: { preferences.skipSwitchWarning = !checked; preferences.setValue("skipSwitchWarning", !checked); preferences.sync(); }
+                            }
+                            QuietCheckBox {
+                                objectName: "autoSaveSetting"; visible: !!backend; theme: appTheme; text: "Autosave sequences"
+                                helpText: "Save valid edits after a brief pause in typing. Invalid entries stay editable without replacing the saved sequence."
+                                checked: backend ? backend.autoSave : false; onToggled: backend.autoSave = checked
+                            }
+                            QuietCheckBox {
+                                objectName: "confirmDeletionSetting"; theme: appTheme; text: "Confirm before deleting sequences"
+                                helpText: "Ask before deleting one or more saved sequences. Turn this back on here at any time."
+                                checked: preferences.confirmDeletion; onToggled: window.saveHudPreference("confirmDeletion", checked)
                             }
                             Caption { text: "interface size" }
                             RowLayout {
                                 Repeater {
                                     model: [1, 1.15, 1.3]
-                                    QuietButton { required property real modelData; objectName: "scale-" + Math.round(modelData * 100); theme: appTheme; text: Math.round(modelData * 100) + "%"; selected: preferences.uiScale === modelData; onClicked: preferences.uiScale = modelData }
+                                    QuietButton { required property real modelData; objectName: "scale-" + Math.round(modelData * 100); theme: appTheme; text: Math.round(modelData * 100) + "%"; helpText: "Scale the main window’s text and controls. HUD size is set separately below."; selected: preferences.uiScale === modelData; onClicked: preferences.uiScale = modelData }
                                 }
                             }
                             Heading { text: "HUD"; visible: !!backend }
-                            QuietCheckBox { objectName: "showHudSetting"; visible: !!backend; theme: appTheme; text: "Show always-on-top HUD"; checked: preferences.showHud; onToggled: window.saveHudPreference("showHud", checked) }
+                            QuietCheckBox { objectName: "showHudSetting"; visible: !!backend; theme: appTheme; text: "Show always-on-top HUD"; helpText: "Show current delay and playback controls in a small window above your game."; checked: preferences.showHud; onToggled: window.saveHudPreference("showHud", checked) }
                             Caption { visible: !!backend; text: "Drag the HUD by its Running / Stopped label. It stays visible when the editor is minimized."; Layout.fillWidth: true }
                             Flow {
                                 visible: !!backend; Layout.fillWidth: true; spacing: 8
                                 Repeater {
                                     model: [0.75, 1, 1.25, 1.5]
-                                    QuietButton { required property real modelData; theme: appTheme; text: "Size " + Math.round(modelData * 100) + "%"; selected: preferences.hudScale === modelData; onClicked: window.saveHudPreference("hudScale", modelData) }
+                                    QuietButton { required property real modelData; theme: appTheme; text: "Size " + Math.round(modelData * 100) + "%"; helpText: "Resize the HUD independently of the main window."; selected: preferences.hudScale === modelData; onClicked: window.saveHudPreference("hudScale", modelData) }
                                 }
                             }
                             Flow {
                                 visible: !!backend; Layout.fillWidth: true; spacing: 8
                                 Repeater {
                                     model: [0.25, 0.5, 0.85, 1]
-                                    QuietButton { required property real modelData; theme: appTheme; text: "Background " + Math.round(modelData * 100) + "%"; selected: preferences.hudOpacity === modelData; onClicked: window.saveHudPreference("hudOpacity", modelData) }
+                                    QuietButton { required property real modelData; theme: appTheme; text: "Background " + Math.round(modelData * 100) + "%"; helpText: "Change HUD background opacity. Text stays fully visible."; selected: preferences.hudOpacity === modelData; onClicked: window.saveHudPreference("hudOpacity", modelData) }
                                 }
                             }
-                            QuietCheckBox { visible: !!backend; theme: appTheme; text: "Show HUD playback controls"; checked: preferences.hudControls; onToggled: window.saveHudPreference("hudControls", checked) }
-                            QuietButton { visible: !!backend; theme: appTheme; text: "Bring HUD here"; onClicked: { hud.x = window.x + 40; hud.y = window.y + 100; window.saveHudPreference("showHud", true); } }
+                            QuietCheckBox { visible: !!backend; theme: appTheme; text: "Show HUD playback controls"; helpText: "Show or hide the HUD’s Start, Stop, and step buttons."; checked: preferences.hudControls; onToggled: window.saveHudPreference("hudControls", checked) }
+                            QuietButton { visible: !!backend; theme: appTheme; text: "Bring HUD here"; helpText: "Move the HUD beside this window if it is hard to find or on another screen."; onClicked: { hud.x = window.x + 40; hud.y = window.y + 100; window.saveHudPreference("showHud", true); } }
                             Caption { text: "Choose a theme from the header. The HUD follows the same theme."; Layout.fillWidth: true }
                         }
                         Item { Layout.preferredHeight: 20 }
@@ -654,19 +752,38 @@ ApplicationWindow {
                         }
                         Caption { text: "sequences"; Layout.fillWidth: true }
                     }
-                    Repeater {
+                    ListView {
+                        id: sequenceList; objectName: "sequenceList"
+                        Layout.fillWidth: true; Layout.fillHeight: true
+                        Layout.preferredHeight: contentHeight
+                        clip: true; spacing: 8; boundsBehavior: Flickable.StopAtBounds
                         model: backend ? backend.presets : ["Utopia", "Bridge practice", "Custom sequence"]
-                        QuietButton {
+                        ScrollBar.vertical: ScrollBar {
+                            visible: sequenceList.contentHeight > sequenceList.height
+                            contentItem: Rectangle { implicitWidth: 4; radius: 2; color: appTheme.muted; opacity: 0.6 }
+                        }
+                        delegate: QuietButton {
+                            id: sequenceRow
                             required property var modelData
-                            theme: appTheme; transparentIdle: preferences.compactSidebar; text: backend ? modelData.name : modelData; subtle: true; selected: backend ? backend.selectedId === modelData.id : sequenceName === modelData
-                            alignLeft: true
-                            Layout.fillWidth: true
-                            onClicked: { if (backend) requestSwitch("sequence", modelData.id); else selectSequence(modelData); }
+                            objectName: backend ? "sequence-" + modelData.id : "sample-" + modelData
+                            width: sequenceList.width - 8
+                            theme: appTheme; transparentIdle: preferences.compactSidebar
+                            text: backend ? modelData.name : modelData; subtle: true; alignLeft: true
+                            selected: backend ? (selectedSequenceIds.length ? selectedSequenceIds.includes(modelData.id) : backend.selectedId === modelData.id) : sequenceName === modelData
+                            accentText: !!backend && backend.selectedId === modelData.id
+                            onClicked: { if (backend) chooseSequence(modelData.id, Qt.NoModifier); else selectSequence(modelData); }
+                            MouseArea {
+                                anchors.fill: parent; acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                onClicked: function(mouse) {
+                                    if (!backend) { selectSequence(sequenceRow.modelData); return; }
+                                    if (mouse.button === Qt.RightButton) openSequenceMenu(sequenceRow.modelData.id, sequenceRow, mouse.x, mouse.y);
+                                    else chooseSequence(sequenceRow.modelData.id, mouse.modifiers);
+                                }
+                            }
                         }
                     }
                     Rule { Layout.topMargin: 12; Layout.bottomMargin: 8 }
                     QuietButton { objectName: "newSequenceButton"; theme: appTheme; transparentIdle: preferences.compactSidebar; text: "+ New sequence"; subtle: true; alignLeft: true; Layout.fillWidth: true; onClicked: { if (backend) requestSwitch("new", ""); else inform("Sequence creation comes with the real preset connection."); } }
-                    Item { Layout.fillHeight: true }
                 }
             }
         }
@@ -714,7 +831,7 @@ ApplicationWindow {
                         Label { text: captureButton.text; font: captureButton.font; color: appTheme.text }
                         Item { Layout.fillWidth: true }
                         Label {
-                            text: backend ? (backend.bindings.length > 2 ? backend.bindings[2].text : "") : "F7"
+                            text: backend ? (backend.hotkeysEnabled && backend.bindings.length > 2 ? backend.bindings[2].text : "") : "F7"
                             font: captureButton.font; color: appTheme.muted
                             Layout.fillWidth: true; horizontalAlignment: Text.AlignRight; elide: Text.ElideRight
                         }
@@ -722,7 +839,7 @@ ApplicationWindow {
                 }
             }
         }
-        Caption { text: backend ? backend.error : ""; visible: backend && backend.error !== ""; Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24; color: appTheme.accent }
+        Caption { text: backend ? backend.error : ""; visible: backend && backend.error !== ""; Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24; Layout.bottomMargin: 16; color: appTheme.accent }
         Caption { text: notice; visible: notice !== ""; Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24; Layout.bottomMargin: 12; color: appTheme.accent }
         Rule { visible: preferences.showHints }
         RowLayout {
@@ -742,7 +859,7 @@ ApplicationWindow {
         id: sidebarPointer
         blocking: false
         onPointChanged: {
-            if (themePicker.visible || window.page !== "sequences" || !preferences.compactSidebar) return;
+            if (themePicker.visible || sequenceMenu.visible || deleteSequencesDialog.visible || window.page !== "sequences" || !preferences.compactSidebar) return;
             const px = point.position.x;
             if (px <= 16) {
                 hideTimer.stop();

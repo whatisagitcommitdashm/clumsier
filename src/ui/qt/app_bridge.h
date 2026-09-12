@@ -22,6 +22,8 @@ class AppBridge : public QObject {
     Q_PROPERTY(QVariantList bindings READ bindings NOTIFY bindingsChanged)
     Q_PROPERTY(QString recording READ recording NOTIFY bindingsChanged)
     Q_PROPERTY(bool globalHotkeysAvailable READ globalHotkeysAvailable CONSTANT)
+    Q_PROPERTY(bool hotkeysEnabled READ hotkeysEnabled WRITE setHotkeysEnabled NOTIFY preferencesChanged)
+    Q_PROPERTY(bool autoSave READ autoSave WRITE setAutoSave NOTIFY preferencesChanged)
 public:
     explicit AppBridge(NetworkBackend backend, const QString &root = {}, bool enableHotkeys = true, QObject *parent = nullptr);
     ~AppBridge() override;
@@ -37,6 +39,12 @@ public:
     QString recording() const;
     bool globalHotkeysAvailable() const;
     void reportBackendError(const QString &message) { fail(message); }
+    bool hotkeysEnabled() const;
+    bool autoSave() const;
+    void setHotkeysEnabled(bool enabled);
+    void setAutoSave(bool enabled);
+    Q_INVOKABLE bool executeHotkey(int action);
+    Q_INVOKABLE bool batchSequences(const QString &operation, const QStringList &ids, const QUrl &folder = {});
     Q_INVOKABLE void refresh();
     Q_INVOKABLE bool selectPreset(const QString &id);
     Q_INVOKABLE bool newPreset();
@@ -61,6 +69,7 @@ public:
     Q_INVOKABLE bool saveBinding(int action, const QString &text);
     Q_INVOKABLE void clearError();
 signals:
+    void preferencesChanged();
     void libraryChanged();
     void draftChanged();
     void stateChanged();
@@ -73,5 +82,7 @@ private:
     void prepareSequence();
     bool storeServerAssociation();
     void restoreServerAssociation();
+    bool savePreference(const QString &key, bool value);
+    void updateHotkeyPause();
     static AppBridge *listenerOwner;
 };

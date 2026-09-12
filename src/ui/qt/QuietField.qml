@@ -13,6 +13,13 @@ TextField {
     placeholderTextColor: theme.muted
     selectionColor: theme.accent
     selectedTextColor: theme.surface
+    selectByMouse: true
+    Keys.onEscapePressed: function(event) {
+        // Let an enclosing popup handle Escape before moving focus out of it.
+        event.accepted = false;
+        Qt.callLater(function() { if (field.activeFocus) { field.focus = false; field.Window.window.contentItem.forceActiveFocus(); } });
+    }
+    onAccepted: field.Window.window.contentItem.forceActiveFocus()
     background: Rectangle {
         radius: 5
         color: field.theme.surface

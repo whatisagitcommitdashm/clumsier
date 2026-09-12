@@ -62,6 +62,9 @@ Popup {
                 return rank || a.name.localeCompare(b.name);
             });
         highlighted = results.length ? 0 : -1;
+        // Searching can shrink a previously scrolled list to one row. Finish
+        // relayout before positioning so that row cannot remain below the clip.
+        list.forceLayout();
     }
     function highlight(index) {
         cancelHover();
@@ -106,6 +109,7 @@ Popup {
             Keys.onUpPressed: picker.moveSelection(-1)
             Keys.onReturnPressed: picker.applySelection()
             Keys.onEnterPressed: picker.applySelection()
+            Keys.onEscapePressed: picker.close()
         }
         ListView {
             id: list

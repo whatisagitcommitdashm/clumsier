@@ -10,6 +10,7 @@
 #include <QFile>
 #include <functional>
 #include "window_chrome.h"
+#include "text_focus.h"
 #include <QScreen>
 #ifdef Q_OS_WIN
 #define WIN32_LEAN_AND_MEAN
@@ -38,6 +39,7 @@ int main(int argc, char **argv)
     auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
     if (!window) return 2;
     WindowChrome chrome(window);
+    TextFocus textFocus(window);
     if (!window || !QTest::qWaitForWindowExposed(window)) return 2;
     QTest::qWait(250);
     auto check = [](bool ok, const char *description) {
@@ -60,6 +62,15 @@ int main(int argc, char **argv)
         }
         auto *item = findItem(window->contentItem(), QString::fromLatin1(name));
         if (!item) return false;
+        // Settings can extend below the viewport at larger interface scales.
+        // Scroll the owning Flickable before clicking its actual screen position.
+        for (auto *parent = item->parentItem(); parent; parent = parent->parentItem()) {
+            if (!parent->property("contentY").isValid()) continue;
+            const auto bounds = item->mapRectToItem(parent, item->boundingRect());
+            const qreal delta = bounds.bottom() > parent->height() ? bounds.bottom() - parent->height() + 8
+                              : bounds.top() < 0 ? bounds.top() - 8 : 0;
+            if (delta) { parent->setProperty("contentY", parent->property("contentY").toReal() + delta); QTest::qWait(100); }
+        }
         qInfo() << "Click" << name << item->mapToScene(QPointF(item->width()/2, item->height()/2));
         QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier,
                          item->mapToScene(QPointF(item->width()/2, item->height()/2)).toPoint());
@@ -228,6 +239,9 @@ int main(int argc, char **argv)
     QTest::keyClick(window, Qt::Key_Return);
     QTest::qWait(250);
     ok &= check(window->flags().testFlag(Qt::FramelessWindowHint), "Native title bar is removed");
+    QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, QPoint(110, 25));
+    QTest::qWait(100);
+    ok &= check(window->visibility() == QWindow::Windowed, "Double-clicking header does not maximize");
     ok &= click("maximizeButton");
     QTest::qWait(400);
 #ifdef Q_OS_WIN
