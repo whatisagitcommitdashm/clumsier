@@ -4,8 +4,9 @@ A network-delay application evolving from Clumsy, with a Qt Quick interface, con
 
 **Development status.** The Qt beta is the main application. Windows has live
 Lag controls, saved sequences, global hotkeys, and a HUD; Linux has a connected
-Qt frontend and native backend, with platform work still pending. macOS remains
-a separate prototype. The IUP application is retired. Beta naming does not mean
+Qt frontend and native backend, with platform work still pending. macOS has an
+integrated Qt backend and global-hotkey implementation undergoing signed native
+acceptance. The IUP application is retired. Beta naming does not mean
 the security review or release acceptance checks are complete.
 
 To run a published Windows beta, extract the Windows x64 ZIP from
@@ -37,6 +38,13 @@ The [Qt frontend is now connected to Linux](docs/QT-LINUX.md). Open it with
 `sh scripts/run-qt-linux.sh`, or use `sh scripts/demo-qt-linux.sh` for an isolated
 GUI demo with live ping measurements. Linux global hotkeys remain pending.
 
+## macOS development
+
+The Qt application has an experimental macOS Network Extension backend and
+passive global hotkeys. See [macOS support](docs/MACOS.md) for unsigned local
+builds, signed extension packaging, Input Monitoring setup, current limitations,
+and native acceptance requirements. Signed packet behavior has not been verified.
+
 ## Global hotkeys
 
 The defaults are **F5: Start**, **F6: Stop**, and **F7: Toggle**. Start leaves an already running capture running; Stop leaves a stopped capture stopped. Toggle switches between those states.
@@ -45,13 +53,18 @@ Click a binding field or its **Record** button. Hold the desired keys and/or mou
 
 Validated bindings are saved immediately. Each binding and the global listener have an **Enabled/Disabled** button; mouse controls remain available when hotkeys are disabled. Next step, Previous step, and Reset sequence are initially unassigned. Search and New sequence are customizable window shortcuts, defaulting to Ctrl+F and Ctrl+T.
 
-Supported combinations include bare letters or digits (`W`, `7`), several ordinary keys (`Q + E`), modifiers, and mouse buttons (`Ctrl + Mouse4`). Mouse1/2/3 mean left/right/middle; Mouse4/5 are the two extra buttons. Left and right modifiers are interchangeable. Function keys, navigation keys, punctuation, and other Windows virtual keys are also supported. Uncommon keys use a stable `KeyXX` label; punctuation labels follow US key names. Keyboard hardware and Windows shortcuts can limit which combinations are observable. Mouse-wheel bindings and sequences of separate presses are not implemented yet.
+Supported combinations include bare letters or digits (`W`, `7`), several ordinary keys (`Q + E`), modifiers, and mouse buttons (`Ctrl + Mouse4`). Mouse1/2/3 mean left/right/middle; Mouse4/5 are the two extra buttons. Left and right modifiers are interchangeable. Function keys, navigation keys, punctuation, and keypad keys are supported on Windows and macOS. Windows also exposes uncommon virtual keys through a stable `KeyXX` label. Punctuation labels follow US key names. Keyboard hardware and operating-system shortcuts can limit which combinations are observable. Mouse-wheel bindings and sequences of separate presses are not implemented yet.
 
 **Input passes through:** Clumsier forwards keyboard and mouse presses and releases, so other applications can also act on the same combination. This replaces the previous exclusive Windows hotkey registration, so Clumsier no longer reports another application's registered shortcuts as conflicts.
 
 A combination fires when all its inputs are down, regardless of their press order. Extra held inputs are allowed, so movement keys do not block another hotkey. Holding a combination does not repeat it; releasing and pressing one of its members again rearms it. Two bindings cannot be identical or contain one another (for example, `Q` and `Q + E`). Otherwise both matching bindings may fire if their inputs are held together. Hotkeys are global, including while Clumsier is focused; recording and preset/profile dialogs are exceptions.
 
-Settings remain in `%LOCALAPPDATA%\Clumsier\hotkeys.ini`. Existing version-1 and version-2 settings load automatically with the sequence actions unassigned; Saving a binding writes version 3. Failed validation or saving leaves the active bindings unchanged. Invalid files are reported and preserved until you explicitly save replacement settings. Bindings remain separate from packet-filter presets.
+Settings remain in `%LOCALAPPDATA%\Clumsier\hotkeys.ini` on Windows and the
+Clumsier application-support directory on macOS. Existing version-1 and
+version-2 settings load automatically with the sequence actions unassigned;
+saving a binding writes version 3. Failed validation or saving leaves the active
+bindings unchanged. Invalid files are reported and preserved until you explicitly
+save replacement settings. Bindings remain separate from packet-filter presets.
 
 ## Presets and sequences
 
@@ -67,7 +80,7 @@ Selecting a sequence starts at step 1. Switching sequences or Quick Controls whi
 - A searchable preset launcher.
 - Optional mouse-wheel adjustment of added delay.
 - A customizable home screen.
-- Full support for Linux & MacOS
+- Full release validation for Linux and macOS
 
 ## Development
 
@@ -80,6 +93,7 @@ Run `scripts\test-core.cmd`, `scripts\test-lifecycle.cmd`, `scripts\test-hotkeys
 - `src/core/`: plain C settings, preset JSON/calculations, sequence controller, action identifiers, and input matching. No Windows or IUP headers.
 - `src/backends/windows/`: the WinDivert adapter, structured traffic-filter translation, and Lag queue. `legacy/` contains the inherited packet capture and packet-list machinery still used by Lag.
 - `src/platform/windows/`: global input listening, Windows key names/settings files, preset/profile storage. The Qt executable requests elevation through its build manifest.
+- `src/platform/macos/`: Network Extension control, global input listening, macOS key mapping/settings, and native Qt adapters.
 - `src/ui/qt/`: the main Qt application, sequence editor, settings, theme picker, HUD, and bridge to the shared controller.
 
 The controller owns accepted Lag settings and queries the backend for running state. Failed live updates leave accepted settings unchanged. Backends implement start, stop, and applying Lag conditions; the shared interface does not expose WinDivert packets or handles. Settings can select traffic structurally or explicitly name a native filter backend. The existing filter editor uses the `windivert` native filter option.
@@ -88,7 +102,11 @@ The controller owns accepted Lag settings and queries the backend for running st
 
 Here, "immediately" means the new rules apply on the next processing pass, not that the settings call synchronously delivers packets. Disabling Lag or a direction releases the affected queued packets on processing; Stop flushes the queue. Traffic selection changes still require stopping capture first. Failed updates leave the previous rules in effect. The Windows queue retains its inherited overload limit. Other backends will need to document their scheduling precision and overload behavior.
 
-This is an operational Windows application with a portable core, not a Linux/macOS release. Windows input IDs and filesystem access stay in the Windows adapter; preset JSON and sequence behavior live in the portable core. A future platform must supply its own key mapping and storage integration. The retained packet machinery has no IUP dependency.
+This is an operational Windows application with experimental Linux and macOS
+integrations, not yet a validated Linux/macOS release. Native input IDs and
+filesystem access stay in platform adapters; preset JSON, sequence behavior and
+hotkey matching live in the portable core. The retained packet machinery has no
+IUP dependency.
 
 ## License
 

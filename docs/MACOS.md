@@ -4,7 +4,9 @@ The Qt application uses a Network Extension packet filter for system-wide lag.
 It shares the preset library, quick controls, sequences and HUD with the other
 platforms. The macOS adapter activates and registers the provider, sends
 acknowledged settings over NSXPC and keeps a running session alive with
-heartbeats. Global hotkeys are not implemented. No delay starts automatically.
+heartbeats. A passive Core Graphics event tap supplies global keyboard and
+mouse-button hotkeys after the user grants Input Monitoring access. No delay
+starts automatically.
 
 **Validation:** the portable scheduler and synthetic packet-selection tests pass
 on macOS 15.7.3 (arm64), using macOS SDK 26.0. The Apple API probe and both the
@@ -78,6 +80,12 @@ protections to work around signing problems. Launch it, then use Quick Controls
 or a saved sequence. The first Start may ask you to approve the system extension
 and network filter in System Settings.
 
+Global hotkeys default to off on macOS. The first **Enable** or **Record** click
+requests Input Monitoring access. If macOS opens System Settings, approve
+Clumsier under **Privacy & Security > Input Monitoring**, return to the app and
+try the action again. The listener is passive: it does not suppress or rewrite
+input, and playback buttons remain usable when access is absent or revoked.
+
 1. Choose a numeric remote IP, protocol/port and traffic direction as needed.
    Windows-native filter strings are rejected by shared validation.
 2. Start Quick Controls or a sequence. For target-ping sequences, enter the
@@ -147,8 +155,17 @@ need native observation. Start tests with ordinary Ethernet/Wi-Fi peer traffic;
 avoid fragmented datagrams when selecting ports.
 
 The Qt preset library is persisted using the portable non-Windows Qt store.
-Global hotkeys remain unavailable on macOS. Signed activation, real packet timing,
-sleep/wake, VPN and load behavior still require native acceptance before release.
+`hotkey_listener.mm` owns a listen-only session event tap on a dedicated run-loop
+thread. Its callback queues canonical key/button transitions to the Qt thread;
+the shared matcher performs recording, overlap handling, pause boundaries and
+action dispatch there. Left/right modifiers normalize to one saved name, while
+their physical held states remain separate. Settings use atomic writes and the
+same version-3 action names as Windows. Tap-disable notifications clear held
+state before the listener is re-enabled.
+
+Signed activation, real packet timing, hotkeys while a game is focused,
+permission revocation, sleep/wake, VPN and load behavior still require native
+acceptance before release.
 
 ## Tests and native acceptance
 
@@ -180,6 +197,10 @@ After building/signing, record macOS/SDK version, CPU architecture and interface
 - Force-terminate the provider and document retained-packet loss and future
   traffic recovery. Exercise sleep/wake, interface changes, load and a VPN before
   everyday use. Never reset global firewall rules as a cleanup shortcut.
+- Grant, deny and revoke Input Monitoring. Verify keyboard chords, left/right
+  modifiers, F-keys, Mouse1-5, recording, pause while editing, enable/disable and
+  repeated app shutdown while another application or game has focus. Input must
+  continue reaching that application.
 
 ## Primary references
 
@@ -203,3 +224,10 @@ use neither that workaround nor PF rules. Review Apple's
 [current Developer Program terms](https://developer.apple.com/support/terms/apple-developer-program-license-agreement/)
 before distribution; this project's account entitlements/distribution eligibility
 have not been independently verified.
+
+Global input uses Apple's public
+[`CGEventTapCreate`](https://developer.apple.com/documentation/coregraphics/cgevent/tapcreate(tap:place:options:eventsofinterest:callback:userinfo:))
+API with the listen-only option. Permission checks use
+[`CGPreflightListenEventAccess`](https://developer.apple.com/documentation/coregraphics/cgpreflightlisteneventaccess())
+and user-initiated requests use
+[`CGRequestListenEventAccess`](https://developer.apple.com/documentation/coregraphics/cgrequestlisteneventaccess()).

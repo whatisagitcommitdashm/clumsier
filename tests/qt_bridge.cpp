@@ -146,7 +146,8 @@ int main(int argc, char **argv) {
         check(bridge.installStarterPresets() && bridge.presets().size() == 3, "Starter installation is idempotent");
         const QUrl exported = QUrl::fromLocalFile(starters.filePath("shared.json"));
         check(bridge.exportPreset(exported), "Export portable server hint");
-        QFile shared(exported.toLocalFile()); shared.open(QIODevice::ReadOnly);
+        QFile shared(exported.toLocalFile());
+        check(shared.open(QIODevice::ReadOnly), "Open exported portable server hint");
         const QByteArray bytes = shared.readAll(); shared.close();
         check(bytes.contains("Mineplex") && !bytes.contains("baseline"), "Shared JSON includes server name but not personal baseline");
         AppBridge imported(capture.backend(), recipient.path(), false);
@@ -260,7 +261,7 @@ int main(int argc, char **argv) {
         check(bridge.deletePreset() && bridge.deleteProfile(otherServerId) && bridge.selectPreset(savedId), "Remove association-test copy");
         draft = bridge.draft(); draft["name"] = ""; bridge.updateDraft(draft);
         check(!bridge.save() && bridge.dirty(), "Invalid draft stays editable and cannot overwrite saved file"); bridge.discard();
-#ifdef Q_OS_WIN
+#if defined(Q_OS_WIN) || defined(Q_OS_MAC)
         check(bridge.saveBinding(2, "W+Mouse4"), "Expanded binding parser available");
         check(!bridge.saveBinding(0, "W+Mouse4"), "Conflicting binding rejected");
         check(bridge.bindings()[2].toMap()["text"].toString().contains("Mouse4"), "Rejected edit preserves existing binding");
@@ -621,14 +622,19 @@ int main(int argc, char **argv) {
             bridge.discard(); bridge.selectPreset(savedId);
             check(find(quickWindow->contentItem(), "feedbackButton") == nullptr, "Discord feedback handoff is removed");
             window->setProperty("page", "hotkeys"); QTest::qWait(100);
-            // Global hotkeys exist on Windows only; macOS matches Linux's
-            // window-shortcut behavior, so skip the master toggle elsewhere.
+            // macOS intentionally defaults global monitoring off; Windows may
+            // begin enabled. Verify the toggle relative to its initial state.
             if (bridge.globalHotkeysAvailable()) {
+                const bool initiallyEnabled = bridge.hotkeysEnabled();
                 click("hotkeysEnabledToggle");
                 auto *masterToggle = find(quickWindow->contentItem(), "hotkeysEnabledToggle");
-                check(masterToggle && masterToggle->property("text") == "Disabled" && !masterToggle->property("selected").toBool(), "Master toggle shows Disabled without highlight");
+                check(masterToggle && masterToggle->property("selected").toBool() != initiallyEnabled
+                    && masterToggle->property("text").toString() == (initiallyEnabled ? "Disabled" : "Enabled"),
+                    "Master toggle reflects its changed state");
                 click("hotkeysEnabledToggle");
-                check(masterToggle && masterToggle->property("text") == "Enabled" && masterToggle->property("selected").toBool(), "Master toggle shows Enabled with highlight");
+                check(masterToggle && masterToggle->property("selected").toBool() == initiallyEnabled
+                    && masterToggle->property("text").toString() == (initiallyEnabled ? "Enabled" : "Disabled"),
+                    "Master toggle returns to its initial state");
             }
             click("searchShortcutRecorder");
             QTest::keyClick(quickWindow, Qt::Key_F, Qt::ControlModifier | Qt::ShiftModifier); QTest::qWait(50);

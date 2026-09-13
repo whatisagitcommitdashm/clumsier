@@ -42,10 +42,12 @@ if(APPLE)
     enable_language(OBJCXX)
     add_library(clumsier-macos-qt STATIC
         ../../platform/macos/qt_backend.cpp ../../platform/macos/mac_control.mm
+        ../../platform/macos/hotkeys.cpp ../../platform/macos/hotkey_listener.mm
         ../../platform/linux/preset_store.cpp)
     target_compile_options(clumsier-macos-qt PRIVATE -fobjc-arc -fblocks)
     target_link_libraries(clumsier-macos-qt PUBLIC clumsier-core Qt6::Core
-        "-framework Foundation" "-framework NetworkExtension" "-framework SystemExtensions")
+        "-framework Foundation" "-framework CoreGraphics"
+        "-framework NetworkExtension" "-framework SystemExtensions")
 endif()
 if(WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
     add_library(clumsier-qt-bridge STATIC app_bridge.cpp)
@@ -135,6 +137,10 @@ if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME qt-linux-store COMMAND qt-store-test)
 endif()
 if(BUILD_TESTING AND APPLE)
+    qt_add_executable(qt-mac-hotkeys-test ../../../tests/macos/hotkeys.cpp)
+    target_include_directories(qt-mac-hotkeys-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../..)
+    target_link_libraries(qt-mac-hotkeys-test PRIVATE clumsier-macos-qt Qt6::Core)
+    add_test(NAME qt-mac-hotkeys COMMAND qt-mac-hotkeys-test)
     qt_add_executable(qt-mac-backend-test ../../../tests/macos/qt_backend.cpp)
     target_include_directories(qt-mac-backend-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
     target_link_libraries(qt-mac-backend-test PRIVATE clumsier-macos-qt Qt6::Test)
