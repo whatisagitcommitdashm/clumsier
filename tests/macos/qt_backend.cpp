@@ -30,8 +30,8 @@ int main(int argc, char **argv) {
     strcpy(target.traffic.remote_address, "203.0.113.7");
     target.traffic.remote_port = 25565;
 
-    // Inbound-only delay: policy must widen the capture direction to both so
-    // shared validation accepts it, while only inbound is delayed.
+    // Inbound-only delay: policy follows the delayed direction while the BOTH
+    // capture target remains unchanged.
     LagSettings lag{};
     lag.enabled = true; lag.inbound = true; lag.outbound = false;
     lag.inbound_ms = 150; lag.outbound_ms = 0;
@@ -75,6 +75,19 @@ int main(int argc, char **argv) {
     check(presetParse(zero.toUtf8().constData(), zero.size(), &parsedZero, error), "Zero-delay preset parses");
     StepResult resolvedZero{};
     check(presetResolve(&parsedZero, 0, true, 0, &resolvedZero, error), "Zero-delay preset resolves");
+
+    // Disabled settings may retain nonzero values for a later re-enable. The
+    // synthesized preset must not turn those retained values into active lag.
+    lag.enabled = false; lag.inbound = true; lag.outbound = true;
+    lag.inbound_ms = 50; lag.outbound_ms = 50;
+    const QString disabled = macQtPresetJson(&target, &lag, error);
+    check(!disabled.isEmpty(), "Disabled preset serializes");
+    Preset parsedDisabled{};
+    StepResult resolvedDisabled{};
+    check(presetParse(disabled.toUtf8().constData(), disabled.size(), &parsedDisabled, error), "Disabled preset parses");
+    check(presetResolve(&parsedDisabled, 0, true, 0, &resolvedDisabled, error), "Disabled preset resolves");
+    check(!resolvedDisabled.lag.enabled && resolvedDisabled.lag.inbound_ms == 0 && resolvedDisabled.lag.outbound_ms == 0,
+          "Disabled settings cannot activate retained delay values");
 
     if (failures) { fprintf(stderr, "%d failure(s)\n", failures); return 1; }
     printf("macOS Qt backend contract checks passed\n");

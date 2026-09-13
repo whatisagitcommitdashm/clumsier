@@ -6,6 +6,7 @@
 #import <Foundation/Foundation.h>
 #import <NetworkExtension/NetworkExtension.h>
 #import <SystemExtensions/SystemExtensions.h>
+#import <objc/runtime.h>
 #import "control.h"
 
 #include <QElapsedTimer>
@@ -14,6 +15,7 @@
 #include <QJsonObject>
 #include <QString>
 #include <QVariantList>
+#include <cstdint>
 
 #include "qt_backend.h"
 
@@ -48,11 +50,20 @@ struct MacControl {
     BOOL waiting = NO;        // A command is being waited on.
     BOOL running = NO;        // Provider-reported delay state.
     MacReply *pending = nullptr; // Stage record the current callbacks complete.
+    uint64_t stageNumber = 0; // Reject callbacks from an earlier stage.
+    uint64_t connectionNumber = 0; // Reject callbacks from an earlier connection.
+    uint64_t heartbeatNumber = 0; // Reject out-of-order heartbeat replies.
 };
 
-static void completePending(MacControl *control, MacReply *reply, bool ok, bool running, NSString *error) {
+static uint64_t beginStage(MacControl *control, MacReply *reply) {
+    control->pending = reply;
+    return ++control->stageNumber;
+}
+
+static void completePending(MacControl *control, MacReply *reply, uint64_t stageNumber,
+                            bool ok, bool running, NSString *error) {
     // Late callbacks after a timeout or stage switch must not write anywhere.
-    if (!reply || control->pending != reply || reply->done) return;
+    if (!reply || control->pending != reply || control->stageNumber != stageNumber || reply->done) return;
     reply->ok = ok;
     reply->running = running;
     reply->error = error ? QString::fromNSString(error) : QString();
@@ -67,7 +78,9 @@ static bool pumpStage(MacControl *control, MacReply *reply, int limitMs, const c
     deadline.start();
     QEventLoop loop;
     while (!reply->done) {
-        loop.processEvents(QEventLoop::AllEvents, 50);
+        // Match the Linux adapter: keep XPC/timer delivery alive without
+        // allowing user input to re-enter the synchronous controller contract.
+        loop.processEvents(QEventLoop::ExcludeUserInputEvents, 50);
         if (control->shutdown) {
             control->pending = nullptr;
             return false;
@@ -88,7 +101,7 @@ static bool pumpStage(MacControl *control, MacReply *reply, int limitMs, const c
 }
 - (instancetype)initWithNotify:(MacNotify)notify context:(void *)context;
 - (void)invalidate;
-- (void)connectionLost;
+- (void)connectionLost:(NSXPCConnection *)connection generation:(uint64_t)generation;
 - (NSXPCConnection *)ensureConnection:(NSString **)error;
 - (BOOL)ensureActive:(MacReply *)reply;
 - (BOOL)ensureRegistered:(MacReply *)reply;
@@ -111,26 +124,27 @@ static bool pumpStage(MacControl *control, MacReply *reply, int limitMs, const c
 
 - (void)invalidate {
     control.shutdown = YES;
-    [self connectionLost];
+    [self connectionLost:control.connection generation:control.connectionNumber];
 }
 
 // Drop the provider connection. The provider releases held traffic when its
 // client disconnects; report uncertainty instead of pretending a Stop was
 // acknowledged.
-- (void)connectionLost {
-    NSXPCConnection *connection = control.connection;
+- (void)connectionLost:(NSXPCConnection *)connection generation:(uint64_t)generation {
+    if (!connection || control.connection != connection || control.connectionNumber != generation) return;
     control.connection = nil;
-    if (connection) {
-        connection.interruptionHandler = nil;
-        connection.invalidationHandler = nil;
-        [connection invalidate];
-    }
+    ++control.connectionNumber;
+    connection.interruptionHandler = nil;
+    connection.invalidationHandler = nil;
+    [connection invalidate];
     if (control.running) {
         control.running = NO;
         if (control.notify)
             control.notify(control.context, false, QString::fromNSString(@"The packet provider connection failed or was lost. Close the prototype app if it is running. Held traffic should release; state is unconfirmed."));
     }
-    completePending(&control, control.pending, NO, NO, @"The packet provider connection failed or was lost.");
+    MacReply *pending = control.pending;
+    completePending(&control, pending, control.stageNumber, NO, NO,
+                    @"The packet provider connection failed or was lost.");
 }
 
 - (NSXPCConnection *)ensureConnection:(NSString **)error {
@@ -145,11 +159,17 @@ static bool pumpStage(MacControl *control, MacReply *reply, int limitMs, const c
     [connection setCodeSigningRequirement:macPeerRequirement(extensionID)];
     connection.remoteObjectInterface = [NSXPCInterface interfaceWithProtocol:@protocol(ClumsierControl)];
     __weak MacControlHelper *weakSelf = self;
+    __weak NSXPCConnection *weakConnection = connection;
+    const uint64_t generation = ++control.connectionNumber;
     connection.interruptionHandler = ^{
-        dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf connectionLost]; });
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [weakSelf connectionLost:weakConnection generation:generation];
+        });
     };
     connection.invalidationHandler = ^{
-        dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf connectionLost]; });
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [weakSelf connectionLost:weakConnection generation:generation];
+        });
     };
     [connection resume];
     control.connection = connection;
@@ -166,22 +186,26 @@ static bool pumpStage(MacControl *control, MacReply *reply, int limitMs, const c
     OSSystemExtensionRequest *request = [OSSystemExtensionRequest
         activationRequestForExtension:extensionID queue:dispatch_get_main_queue()];
     request.delegate = self;
-    control.pending = reply;
+    const uint64_t stageNumber = beginStage(&control, reply);
+    objc_setAssociatedObject(request, @selector(finishActivation:replySource:),
+                             @(stageNumber), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     [[OSSystemExtensionManager sharedManager] submitRequest:request];
     if (!pumpStage(&control, reply, kActivationTimeoutMs, "System extension activation")) return NO;
     return reply->ok;
 }
 
 - (void)finishActivation:(OSSystemExtensionRequestResult)result replySource:(OSSystemExtensionRequest *)request {
-    (void)request;
+    NSNumber *stageValue = objc_getAssociatedObject(request, @selector(finishActivation:replySource:));
+    const uint64_t stageNumber = stageValue.unsignedLongLongValue;
     if (result == OSSystemExtensionRequestWillCompleteAfterReboot) {
-        control.activated = YES;
-        completePending(&control, control.pending, YES, NO, nil);
-        if (control.notify) control.notify(control.context, false, QString::fromNSString(@"macOS requires a restart to finish changing the extension."));
+        completePending(&control, control.pending, stageNumber, NO, NO,
+                        @"macOS requires a restart to finish changing the extension.");
         return;
     }
+    MacReply *pending = control.pending;
+    if (!pending || control.stageNumber != stageNumber || pending->done) return;
     control.activated = YES;
-    completePending(&control, control.pending, YES, NO, nil);
+    completePending(&control, pending, stageNumber, YES, NO, nil);
 }
 
 - (void)requestDidBecomeActive:(OSSystemExtensionRequest *)request {
@@ -189,8 +213,9 @@ static bool pumpStage(MacControl *control, MacReply *reply, int limitMs, const c
 }
 
 - (void)request:(OSSystemExtensionRequest *)request didFailWithError:(NSError *)error {
-    (void)request;
-    completePending(&control, control.pending, NO, NO, error.localizedDescription);
+    NSNumber *stageValue = objc_getAssociatedObject(request, @selector(finishActivation:replySource:));
+    completePending(&control, control.pending, stageValue.unsignedLongLongValue,
+                    NO, NO, error.localizedDescription);
 }
 
 - (void)request:(OSSystemExtensionRequest *)request didFinishWithResult:(OSSystemExtensionRequestResult)result {
@@ -217,20 +242,22 @@ static bool pumpStage(MacControl *control, MacReply *reply, int limitMs, const c
     }
     NEFilterManager *manager = [NEFilterManager sharedManager];
     __weak MacControlHelper *weakSelf = self;
-    control.pending = reply;
+    const uint64_t stageNumber = beginStage(&control, reply);
     [manager loadFromPreferencesWithCompletionHandler:^(NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
             MacControlHelper *strongSelf = weakSelf;
             if (!strongSelf) return;
             if (error) {
-                completePending(&strongSelf->control, strongSelf->control.pending, NO, NO, error.localizedDescription);
+                completePending(&strongSelf->control, reply, stageNumber, NO, NO, error.localizedDescription);
                 return;
             }
             NEFilterProviderConfiguration *existing = manager.providerConfiguration;
             if (existing && manager.enabled &&
                 [existing.filterPacketProviderBundleIdentifier isEqualToString:extensionID]) {
+                if (strongSelf->control.pending != reply ||
+                    strongSelf->control.stageNumber != stageNumber || reply->done) return;
                 strongSelf->control.registered = YES;
-                completePending(&strongSelf->control, strongSelf->control.pending, YES, NO, nil);
+                completePending(&strongSelf->control, reply, stageNumber, YES, NO, nil);
                 return;
             }
             NEFilterProviderConfiguration *config = [NEFilterProviderConfiguration new];
@@ -245,11 +272,13 @@ static bool pumpStage(MacControl *control, MacReply *reply, int limitMs, const c
                     MacControlHelper *savedSelf = weakSelf;
                     if (!savedSelf) return;
                     if (saveError) {
-                        completePending(&savedSelf->control, savedSelf->control.pending, NO, NO, saveError.localizedDescription);
+                        completePending(&savedSelf->control, reply, stageNumber, NO, NO, saveError.localizedDescription);
                         return;
                     }
+                    if (savedSelf->control.pending != reply ||
+                        savedSelf->control.stageNumber != stageNumber || reply->done) return;
                     savedSelf->control.registered = YES;
-                    completePending(&savedSelf->control, savedSelf->control.pending, YES, NO, nil);
+                    completePending(&savedSelf->control, reply, stageNumber, YES, NO, nil);
                 });
             }];
         });
@@ -267,21 +296,25 @@ static bool pumpStage(MacControl *control, MacReply *reply, int limitMs, const c
     }
     const QString command = request.value("command").toString();
     __weak MacControlHelper *weakSelf = self;
+    __weak NSXPCConnection *weakConnection = connection;
+    const uint64_t generation = control.connectionNumber;
     id<ClumsierControl> proxy = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
         (void)error;
-        dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf connectionLost]; });
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [weakSelf connectionLost:weakConnection generation:generation];
+        });
     }];
-    control.pending = reply;
+    const uint64_t stageNumber = beginStage(&control, reply);
     if (command == "stop") {
         [proxy stop:^(NSString *failure, BOOL active) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 MacControlHelper *strongSelf = weakSelf;
                 if (!strongSelf) return;
-                completePending(&strongSelf->control, strongSelf->control.pending, failure.length == 0, active, failure);
+                completePending(&strongSelf->control, reply, stageNumber, failure.length == 0, active, failure);
             });
         }];
         if (!pumpStage(&control, reply, kCommandTimeoutMs, "Stop")) {
-            [self connectionLost];
+            [self connectionLost:connection generation:generation];
             return NO;
         }
         return reply->ok;
@@ -297,11 +330,11 @@ static bool pumpStage(MacControl *control, MacReply *reply, int limitMs, const c
         dispatch_async(dispatch_get_main_queue(), ^{
             MacControlHelper *strongSelf = weakSelf;
             if (!strongSelf) return;
-            completePending(&strongSelf->control, strongSelf->control.pending, failure.length == 0, active, failure);
+            completePending(&strongSelf->control, reply, stageNumber, failure.length == 0, active, failure);
         });
     }];
     if (!pumpStage(&control, reply, kCommandTimeoutMs, "The packet provider")) {
-        [self connectionLost];
+        [self connectionLost:connection generation:generation];
         return NO;
     }
     return reply->ok;
@@ -327,17 +360,24 @@ QVariantList macControlCommand(void *raw, const QJsonObject &request) {
     if (command == "stop" && !control->connection && !control->running)
         return {true, false, QString()};
     control->waiting = YES;
-    MacReply reply;
+    MacReply activationReply;
+    MacReply registrationReply;
+    MacReply commandReply;
     bool ok = false;
     if (command == "start" || command == "apply")
-        ok = [helper ensureActive:&reply] && [helper ensureRegistered:&reply] && [helper sendCommand:request reply:&reply];
+        ok = [helper ensureActive:&activationReply] &&
+             [helper ensureRegistered:&registrationReply] &&
+             [helper sendCommand:request reply:&commandReply];
     else if (command == "stop")
-        ok = [helper sendCommand:request reply:&reply];
+        ok = [helper sendCommand:request reply:&commandReply];
     else
-        reply.error = "Unknown network command.";
+        commandReply.error = "Unknown network command.";
     control->waiting = NO;
-    if (ok) control->running = reply.running;
-    return {ok, bool(control->running), reply.error};
+    const MacReply *finalReply = &commandReply;
+    if (!activationReply.ok && !activationReply.error.isEmpty()) finalReply = &activationReply;
+    else if (!registrationReply.ok && !registrationReply.error.isEmpty()) finalReply = &registrationReply;
+    if (ok) control->running = commandReply.running;
+    return {ok, bool(control->running), finalReply->error};
 }
 
 void macControlHeartbeat(void *raw) {
@@ -348,14 +388,23 @@ void macControlHeartbeat(void *raw) {
     // round trip otherwise, and never during a pending command.
     if (control->waiting || control->shutdown || !control->running || !control->connection) return;
     __weak MacControlHelper *weakSelf = helper;
-    id<ClumsierControl> proxy = [control->connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+    NSXPCConnection *connection = control->connection;
+    __weak NSXPCConnection *weakConnection = connection;
+    const uint64_t connectionNumber = control->connectionNumber;
+    const uint64_t heartbeatNumber = ++control->heartbeatNumber;
+    id<ClumsierControl> proxy = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
         (void)error;
-        dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf connectionLost]; });
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [weakSelf connectionLost:weakConnection generation:connectionNumber];
+        });
     }];
     [proxy heartbeat:^(BOOL active) {
         dispatch_async(dispatch_get_main_queue(), ^{
             MacControlHelper *strongSelf = weakSelf;
-            if (!strongSelf) return;
+            if (!strongSelf || strongSelf->control.connection != weakConnection ||
+                strongSelf->control.connectionNumber != connectionNumber ||
+                heartbeatNumber != strongSelf->control.heartbeatNumber ||
+                strongSelf->control.waiting) return;
             const BOOL was = strongSelf->control.running;
             strongSelf->control.running = active;
             if (was && !active && strongSelf->control.notify)

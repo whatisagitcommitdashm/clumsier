@@ -15,10 +15,26 @@ GROUP_ID="$TEAM_ID.$BUNDLE_ID"
 SERVICE="$GROUP_ID.control"
 APP="build/macos/Clumsier.app"
 EXT="$APP/Contents/Library/SystemExtensions/$EXTENSION_ID.systemextension"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$EXT/Contents/MacOS" build/macos/objects
+QT_BUILD="build/macos/qt"
+: "${CLUMSIER_QT_ROOT:?Set CLUMSIER_QT_ROOT to a Qt 6.8+ macOS SDK compatible with macOS 13}"
+MACDEPLOYQT="${CLUMSIER_QT_ROOT:+$CLUMSIER_QT_ROOT/bin/}macdeployqt"
+command -v "$MACDEPLOYQT" >/dev/null 2>&1 || {
+  echo 'macdeployqt was not found. Set CLUMSIER_QT_ROOT to a Qt 6.8+ macOS SDK.' >&2
+  exit 1
+}
 
 sh scripts/build-macos-native.sh
-cp build/macos/Clumsier-host "$APP/Contents/MacOS/Clumsier"
+cmake -S src/ui/qt -B "$QT_BUILD" -DCMAKE_BUILD_TYPE=Release \
+  "-DCMAKE_PREFIX_PATH=$CLUMSIER_QT_ROOT" \
+  -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+  -DCMAKE_EXE_LINKER_FLAGS=-Wl,-fatal_warnings
+cmake --build "$QT_BUILD" --target clumsier-beta --parallel "${CLUMSIER_BUILD_JOBS:-4}"
+QT_APP="$QT_BUILD/Clumsier.app"
+test -x "$QT_APP/Contents/MacOS/Clumsier" || { echo "Qt app was not built at $QT_APP" >&2; exit 1; }
+rm -rf "$APP"
+cp -R "$QT_APP" "$APP"
+"$MACDEPLOYQT" "$APP" -always-overwrite "-codesign=$SIGN_IDENTITY" -hardened-runtime -timestamp
+mkdir -p "$APP/Contents/Resources" "$EXT/Contents/MacOS" build/macos/objects
 cp build/macos/Clumsier-provider "$EXT/Contents/MacOS/ClumsierPacketFilter"
 cp LICENSE "$APP/Contents/Resources/LICENSE.txt"
 cp external/cjson/LICENSE "$APP/Contents/Resources/cJSON-LICENSE.txt"
@@ -51,7 +67,7 @@ for kind in host extension; do
 EOF
   if [ "$kind" = host ]; then
     cat >> "build/macos/$kind.entitlements" <<EOF
-<key>com.apple.developer.system-extension.install</key><true/><key>com.apple.security.files.user-selected.read-only</key><true/>
+<key>com.apple.developer.system-extension.install</key><true/><key>com.apple.security.files.user-selected.read-write</key><true/>
 EOF
   fi
   printf '%s\n' '</dict></plist>' >> "build/macos/$kind.entitlements"

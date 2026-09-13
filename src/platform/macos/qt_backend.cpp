@@ -24,8 +24,11 @@ QString macQtPresetJson(const CaptureTarget *target, const LagSettings *lag, cha
     preset.target = *target;
     preset.steps[0].kind = STEP_DELAY;
     preset.steps[0].target_ms = 0; // presetDefault's target-ping value is invalid for delay steps.
-    preset.steps[0].inbound_ms = lag->inbound ? lag->inbound_ms : 0;
-    preset.steps[0].outbound_ms = lag->outbound ? lag->outbound_ms : 0;
+    // The shared resolver derives enabled from the serialized delay values.
+    // Preserve an explicitly disabled LagSettings even when it retains the
+    // defaults that should be restored if the user enables lag again.
+    preset.steps[0].inbound_ms = lag->enabled && lag->inbound ? lag->inbound_ms : 0;
+    preset.steps[0].outbound_ms = lag->enabled && lag->outbound ? lag->outbound_ms : 0;
     char *serialized = presetSerialize(&preset, error);
     if (!serialized) return {};
     const QString json = QString::fromUtf8(serialized);
@@ -114,7 +117,6 @@ bool MacQtBackend::apply(void *context, const LagSettings *lag, char *error) {
 void MacQtBackend::stop(void *context) {
     auto *self = static_cast<MacQtBackend *>(context);
     self->request({{"command", "stop"}});
-    self->running_ = false;
 }
 
 bool MacQtBackend::running(void *context) { return static_cast<MacQtBackend *>(context)->running_; }

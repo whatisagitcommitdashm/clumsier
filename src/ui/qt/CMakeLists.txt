@@ -85,6 +85,15 @@ if(WIN32)
     endif()
 endif()
 set_target_properties(clumsier-beta PROPERTIES WIN32_EXECUTABLE TRUE)
+if(APPLE)
+    set_target_properties(clumsier-beta PROPERTIES
+        MACOSX_BUNDLE TRUE
+        OUTPUT_NAME Clumsier
+        MACOSX_BUNDLE_GUI_IDENTIFIER org.clumsier.preview
+        MACOSX_BUNDLE_BUNDLE_NAME Clumsier
+        MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
+        MACOSX_BUNDLE_BUNDLE_VERSION 1)
+endif()
 
 include(CTest)
 if(BUILD_TESTING)
@@ -130,4 +139,7 @@ if(BUILD_TESTING AND APPLE)
     target_include_directories(qt-mac-backend-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
     target_link_libraries(qt-mac-backend-test PRIVATE clumsier-macos-qt Qt6::Test)
     add_test(NAME qt-mac-backend COMMAND qt-mac-backend-test)
+    qt_add_executable(qt-mac-store-test ../../../tests/linux/qt_store.cpp)
+    target_link_libraries(qt-mac-store-test PRIVATE clumsier-macos-qt)
+    add_test(NAME qt-mac-store COMMAND qt-mac-store-test)
 endif()

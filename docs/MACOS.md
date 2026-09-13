@@ -1,9 +1,10 @@
-# macOS Lag prototype
+# macOS support
 
-The intended end-to-end prototype includes an AppKit host, Network Extension
-packet filter, shared JSON preset loading, manual baseline entry, and Start /
-Stop / Previous / Reset / Next controls. It is separate from the Windows UI and
-supports Lag only. No delay starts automatically.
+The Qt application uses a Network Extension packet filter for system-wide lag.
+It shares the preset library, quick controls, sequences and HUD with the other
+platforms. The macOS adapter activates and registers the provider, sends
+acknowledged settings over NSXPC and keeps a running session alive with
+heartbeats. Global hotkeys are not implemented. No delay starts automatically.
 
 **Validation:** the portable scheduler and synthetic packet-selection tests pass
 on macOS 15.7.3 (arm64), using macOS SDK 26.0. The Apple API probe and both the
@@ -19,8 +20,18 @@ Use macOS 13+ and Xcode command line tools. The minimum is 13 because both peers
 use the public [NSXPC signing-requirement API](https://developer.apple.com/documentation/foundation/nsxpcconnection/setcodesigningrequirement(_:)).
 
 For an initial compile/link check with **no Apple account or signing profiles**,
-run `sh scripts/build-macos-native.sh`. This creates standalone executables only;
-they cannot activate the provider without the signed bundle described below.
+configure and build the Qt project, then run its tests:
+
+```sh
+cmake -S src/ui/qt -B build/qt-macos -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/qt-macos --parallel 4
+ctest --test-dir build/qt-macos --output-on-failure
+build/qt-macos/Clumsier.app/Contents/MacOS/Clumsier --check-load
+```
+
+`sh scripts/build-macos-native.sh` separately verifies the provider and legacy
+AppKit prototype host. Neither unsigned build can activate the provider; use the
+signed bundle below for native acceptance.
 
 Register a host bundle identifier in your Apple Developer account, plus another
 with `.packet-filter` appended. Enable Network Extensions and the matching app
@@ -38,12 +49,19 @@ export BUNDLE_ID='YOUR_REGISTERED_HOST_BUNDLE_ID'
 export SIGN_IDENTITY='YOUR_DEVELOPER_ID_APPLICATION_SIGNING_IDENTITY'
 export HOST_PROFILE='/absolute/path/to/host.provisionprofile'
 export EXTENSION_PROFILE='/absolute/path/to/extension.provisionprofile'
+export CLUMSIER_QT_ROOT='/absolute/path/to/a/Qt/6.8+/macOS/kit'
 sh scripts/test-macos.sh
 sh scripts/build-macos-app.sh
 ```
 
-The script compiles and links both executables, generates metadata/entitlements,
-embeds your profiles, signs the nested extension then app, and verifies signatures.
+The Qt kit must itself support macOS 13; the packaging build treats deployment
+target warnings as errors so an SDK with a newer framework minimum cannot
+silently produce an app that falsely claims macOS 13 compatibility. Homebrew's
+current Qt packages are suitable for local development on the macOS versions
+they target, but may not satisfy that release floor. The script builds the Qt
+application, deploys its Qt frameworks with `macdeployqt`, compiles the provider,
+generates metadata/entitlements, embeds your profiles, signs the nested extension
+then app, and verifies signatures.
 Output is `build/macos/Clumsier.app`. Nothing is installed or activated. A valid
 signature does not prove that a profile authorizes every requested feature.
 
@@ -56,41 +74,44 @@ xcrun stapler staple build/macos/Clumsier.app
 ```
 
 Copy the signed app into `/Applications` before activation. Do not disable system
-protections to work around signing problems. Launch it, then:
+protections to work around signing problems. Launch it, then use Quick Controls
+or a saved sequence. The first Start may ask you to approve the system extension
+and network filter in System Settings.
 
-1. **Enable provider.** Approve the system extension and network filter in System
-   Settings when requested. An enabled provider initially allows traffic; it is
-   different from a running delay session.
-2. **Import sequence.** Select a shared Clumsier JSON file, such as
-   `examples/four-leaps.json`. Windows-native filter strings are rejected.
-3. Enter your normal server ping for target-ping mode. The field deliberately
-   starts blank. Added-delay mode may leave it blank.
-4. **Start**, then **Next**, **Previous**, or **Reset**. The cursor changes after
-   the provider accepts the setting. Navigation while stopped never starts delay.
-   The preset's `loop` setting controls wrapping.
-5. **Stop** releases queued packets and leaves the installed provider allowing
-   traffic. **Remove provider** removes this app's filter preferences and requests
-   deactivation. The app reports when macOS requires a restart.
+1. Choose a numeric remote IP, protocol/port and traffic direction as needed.
+   Windows-native filter strings are rejected by shared validation.
+2. Start Quick Controls or a sequence. For target-ping sequences, enter the
+   normal ping measured while Clumsier is stopped.
+3. Approve the extension/filter if macOS asks. The UI commits running state only
+   after the provider acknowledges the command.
+4. Apply another quick delay or navigate the sequence. Already-held packets are
+   governed by the newly acknowledged delay while retaining arrival timestamps.
+5. Stop to release queued packets and leave the installed provider allowing
+   traffic. Removing the installed extension is still a manual/system operation.
 
-Activation can take time. If the initial command cannot connect, retry Stop after
-activation finishes, then Start. For signing errors, check the build output and
-macOS Console logs for Clumsier rather than assuming compilation proves activation.
+Activation can take time. If the initial command times out while approval is
+pending, finish approval, retry Stop to reconcile provider state, then Start.
+For signing errors, check build output and macOS Console logs rather than assuming
+compilation proves activation. Do not run the legacy AppKit prototype at the same
+time: the provider accepts one controlling client.
 
 ## Implementation
 
-`src/platform/macos/host.m` owns the minimal UI and asynchronous cursor changes.
-Both host and provider reuse the shared `presetParse`, `presetValidate` and
-`presetResolve`: no duplicate file schema or target-ping arithmetic. The host
-does not force asynchronous activation/XPC into the synchronous `AppController`
-interface, which would block the UI. Its cursor bridge commits acknowledged
-transitions only.
+`src/platform/macos/qt_backend.cpp` implements the shared `NetworkBackendOps`
+contract. `mac_control.mm` bridges that synchronous controller contract to
+asynchronous extension activation, filter registration and XPC replies with
+bounded nested event-loop waits. Each stage, provider connection and heartbeat
+has a generation token so late callbacks cannot commit stale state. Both sides
+reuse `presetParse`, `presetValidate` and `presetResolve`: there is no duplicate
+file schema or target-ping arithmetic.
 
 `control.h` sends bounded JSON, baseline and step messages over NSXPC. Both peers
 require the configured signing team and exact peer bundle identifier. One host
 connection controls a provider; requests must belong to that current connection.
 Errors/timeouts report uncertainty instead of pretending unacknowledged changes
-succeeded. The host sends heartbeats every three seconds; the provider flushes
-on disconnect or stops after roughly ten seconds without heartbeats.
+succeeded. The Qt backend sends heartbeats every three seconds while running;
+the provider flushes on disconnect or stops after roughly ten seconds without
+heartbeats.
 
 `provider.m` owns the filter, timer and retained packet objects. The native delay
 call executes on the actual packet callback thread under a short state lock.
@@ -125,9 +146,9 @@ broaden a user's filter. Loopback, tunnel interfaces, offload and VPN coexistenc
 need native observation. Start tests with ordinary Ethernet/Wi-Fi peer traffic;
 avoid fragmented datagrams when selecting ports.
 
-There is no macOS preset editor, persisted library, global hotkeys, wheel control,
-timed playback or UI parity. Importing shared sequences and operating their steps
-is this prototype's scope.
+The Qt preset library is persisted using the portable non-Windows Qt store.
+Global hotkeys remain unavailable on macOS. Signed activation, real packet timing,
+sleep/wake, VPN and load behavior still require native acceptance before release.
 
 ## Tests and native acceptance
 
