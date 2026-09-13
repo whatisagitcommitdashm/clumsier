@@ -621,11 +621,15 @@ int main(int argc, char **argv) {
             bridge.discard(); bridge.selectPreset(savedId);
             check(find(quickWindow->contentItem(), "feedbackButton") == nullptr, "Discord feedback handoff is removed");
             window->setProperty("page", "hotkeys"); QTest::qWait(100);
-            click("hotkeysEnabledToggle");
-            auto *masterToggle = find(quickWindow->contentItem(), "hotkeysEnabledToggle");
-            check(masterToggle && masterToggle->property("text") == "Disabled" && !masterToggle->property("selected").toBool(), "Master toggle shows Disabled without highlight");
-            click("hotkeysEnabledToggle");
-            check(masterToggle && masterToggle->property("text") == "Enabled" && masterToggle->property("selected").toBool(), "Master toggle shows Enabled with highlight");
+            // Global hotkeys exist on Windows only; macOS matches Linux's
+            // window-shortcut behavior, so skip the master toggle elsewhere.
+            if (bridge.globalHotkeysAvailable()) {
+                click("hotkeysEnabledToggle");
+                auto *masterToggle = find(quickWindow->contentItem(), "hotkeysEnabledToggle");
+                check(masterToggle && masterToggle->property("text") == "Disabled" && !masterToggle->property("selected").toBool(), "Master toggle shows Disabled without highlight");
+                click("hotkeysEnabledToggle");
+                check(masterToggle && masterToggle->property("text") == "Enabled" && masterToggle->property("selected").toBool(), "Master toggle shows Enabled with highlight");
+            }
             click("searchShortcutRecorder");
             QTest::keyClick(quickWindow, Qt::Key_F, Qt::ControlModifier | Qt::ShiftModifier); QTest::qWait(50);
             click("newSequenceShortcutRecorder");

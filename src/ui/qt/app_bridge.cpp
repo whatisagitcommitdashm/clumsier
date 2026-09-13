@@ -676,7 +676,7 @@ bool AppBridge::saveBinding(int action, const QString &text) {
     d->keys = next; clearError(); emit bindingsChanged(); return true;
 #else
     Q_UNUSED(text);
-    return fail("Global hotkeys are not yet available on Linux. Use the playback buttons.");
+    return fail("Global hotkeys are not yet available on this platform. Use the playback buttons.");
 #endif
 }
 

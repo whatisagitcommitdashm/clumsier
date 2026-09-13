@@ -294,7 +294,7 @@ ColumnLayout {
         Copy { visible: bridge.globalHotkeysAvailable && !bridge.hotkeysEnabled; text: "Hotkeys are off. You can still use all buttons and edit your bindings." }
         Copy { text: bridge.globalHotkeysAvailable
             ? "Click Record, hold your keyboard or mouse combination, then release. Input still reaches your game. Changes are saved immediately. Global actions pause while you edit text or use this tab."
-            : "Global hotkeys are not yet available on Linux. Use the Start, Stop, and sequence playback buttons." }
+            : "Global hotkeys are not yet available on this platform. Use the Start, Stop, and sequence playback buttons." }
         Repeater {
             model: bridge.bindings
             RowLayout {
