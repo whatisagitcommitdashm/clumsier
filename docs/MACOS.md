@@ -5,10 +5,13 @@ packet filter, shared JSON preset loading, manual baseline entry, and Start /
 Stop / Previous / Reset / Next controls. It is separate from the Windows UI and
 supports Lag only. No delay starts automatically.
 
-**Validation:** the portable scheduler and packet-selection tests pass on Windows.
-The AppKit app, native framework integration, signing and packet delivery have
-not been compiled or exercised on a Mac. This is complete intended prototype
-source awaiting native verification, not a tested macOS release.
+**Validation:** the portable scheduler and synthetic packet-selection tests pass
+on macOS 15.7.3 (arm64), using macOS SDK 26.0. The Apple API probe and both the
+AppKit host and packet-provider executables compile and link with the existing
+strict warning flags. The shared prototype console tests also pass. These checks
+were run on September 13, 2026; they do not install or activate an extension.
+Signing, activation and real packet delivery remain unverified: the validation
+machine has no valid code-signing identity. This is not a tested macOS release.
 
 ## Build and run
 
@@ -133,8 +136,10 @@ Windows verification used GCC C11 with `-Wall -Wextra -Werror -pedantic`, plus
 `-lws2_32` for address parsing. Coverage includes original timestamps, delay
 increase/decrease, exact release boundaries, zero, direction disable, invalid
 settings, stop/restart, limits, truncated frames, IPs, VLAN, IPv6 headers/fragments.
-The small `build-macos-probe.sh` compiles API references only; the full app build
-is the next native check.
+The small `build-macos-probe.sh` compiles API references only.
+`build-macos-native.sh` also compiles and links the host and provider; both checks
+pass on the Mac recorded above. Signed bundle activation and packet acceptance
+are the next native checks.
 
 After building/signing, record macOS/SDK version, CPU architecture and interface:
 
