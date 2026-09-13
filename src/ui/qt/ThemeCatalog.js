@@ -4,6 +4,8 @@
 // Prototype palettes followed by the attributed Tinted Theming collection.
 var themes = [
     { id: "lavender", name: "lavender", background: "#1e1e2e", surface: "#181825", text: "#cdd6f4", muted: "#929ab4", accent: "#cba6f7", good: "#a6da95" },
+    // Original adaptation of Discord's charcoal surfaces and brand blurple.
+    { id: "discord", name: "Discord", background: "#313338", surface: "#2b2d31", text: "#f2f3f5", muted: "#b5bac1", accent: "#5865f2", good: "#57f287" },
     { id: "graphite", name: "graphite", background: "#292b30", surface: "#222429", text: "#e0ddd3", muted: "#a5a49e", accent: "#ddbf6c", good: "#a1ce96" },
     { id: "paper", name: "paper", background: "#f3f0e9", surface: "#e9e4db", text: "#333b40", muted: "#61696b", accent: "#705b94", good: "#376e4c" },
     { id: "ocean", name: "ocean", background: "#152b36", surface: "#10232d", text: "#d3e8ec", muted: "#93b3be", accent: "#7cd3d5", good: "#a2d0a1" },

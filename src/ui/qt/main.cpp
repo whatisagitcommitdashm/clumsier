@@ -24,7 +24,8 @@ extern "C" {
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
-    // Separate identity keeps prototype preferences out of the working app.
+    // Keep the original storage identity so existing preferences and the single-
+    // instance lock survive the executable rename. This is not a release label.
     app.setOrganizationName("Clumsier");
     app.setApplicationName("ClumsierUiPreview");
     const bool checkLoad = app.arguments().contains("--check-load");
@@ -48,6 +49,9 @@ int main(int argc, char *argv[])
 #endif
 #endif
 
+#if defined(Q_OS_WIN) || defined(Q_OS_LINUX)
+    if (bridge) bridge->installStarterPresets();
+#endif
     QQmlApplicationEngine engine;
     if (checkLoad) engine.setInitialProperties({{"visible", false}});
 #if defined(Q_OS_WIN) || defined(Q_OS_LINUX)
@@ -55,7 +59,7 @@ int main(int argc, char *argv[])
 #endif
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed,
                      &app, [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
-    engine.loadFromModule("Clumsier.Preview", "Main");
+    engine.loadFromModule("Clumsier.Beta", "Main");
     if (engine.rootObjects().isEmpty()) return 1;
     WindowChrome chrome(qobject_cast<QQuickWindow *>(engine.rootObjects().first()));
     TextFocus textFocus(qobject_cast<QQuickWindow *>(engine.rootObjects().first()));
@@ -75,7 +79,7 @@ int main(int argc, char *argv[])
     }
 #endif
     // Deployment check: exercise the embedded QML and shipped plugins without
-    // opening another window or changing the user's preview settings.
+    // opening another window or changing the user's settings.
     if (checkLoad) QTimer::singleShot(0, &app, &QCoreApplication::quit);
     return app.exec();
 }

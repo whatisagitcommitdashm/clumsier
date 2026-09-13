@@ -65,6 +65,7 @@ Popup {
         // Searching can shrink a previously scrolled list to one row. Finish
         // relayout before positioning so that row cannot remain below the clip.
         list.forceLayout();
+        list.positionViewAtBeginning();
     }
     function highlight(index) {
         cancelHover();
@@ -84,15 +85,17 @@ Popup {
         chosen(results[highlighted].id);
         close();
     }
-    onOpened: {
+    // Reset before the fade starts. Doing this in onOpened could erase text
+    // entered during the animation, especially when reopening the picker.
+    onAboutToShow: {
         search.text = "";
         filter();
         const saved = results.findIndex(function(item) { return item.id === committedId; });
         highlighted = saved;
         previewId = committedId;
         if (saved >= 0) list.positionViewAtIndex(saved, ListView.Contain);
-        search.forceActiveFocus();
     }
+    onOpened: search.forceActiveFocus()
     // Preview never writes preferences and no timer can revive it after cancel.
     onAboutToHide: { cancelHover(); previewId = "" }
     contentItem: ColumnLayout {
@@ -104,7 +107,12 @@ Popup {
             Layout.fillWidth: true
             placeholderText: "Theme…"
             Accessible.name: "Search themes"
-            onTextEdited: { picker.filter(); picker.highlight(picker.highlighted) }
+            onTextEdited: {
+                picker.filter(); picker.highlight(picker.highlighted);
+                // A larger catalog can have the old viewport far below the new
+                // filtered rows. Settle the delegate model before positioning.
+                Qt.callLater(function() { list.forceLayout(); list.positionViewAtBeginning(); });
+            }
             Keys.onDownPressed: picker.moveSelection(1)
             Keys.onUpPressed: picker.moveSelection(-1)
             Keys.onReturnPressed: picker.applySelection()

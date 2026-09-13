@@ -22,6 +22,8 @@ typedef struct {
 typedef struct {
     char name[PRESET_NAME_SIZE];
     char description[PRESET_NOTE_SIZE];
+    // A portable server label, never another player's baseline or local ID.
+    char server[PRESET_NAME_SIZE];
     CaptureTarget target;
     PresetMode mode;
     DelayPolicy policy;

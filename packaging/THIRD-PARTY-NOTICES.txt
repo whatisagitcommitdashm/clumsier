@@ -1,0 +1,33 @@
+Clumsier retains the MIT license and attribution of Clumsy and its contributors.
+Original Clumsier additions use MIT. See Clumsier-LICENSE.txt.
+
+This application dynamically links the unmodified open-source Qt 6.10.3
+libraries (primarily Qt Base and Qt Declarative), used under LGPLv3. Qt tools
+are used during the build. Qt copyright and third-party license texts are in
+licenses/. The SDK's software bills of materials are in licenses/qt-sbom/.
+You may replace the dynamically linked Qt libraries with compatible modified
+versions. Nothing in Clumsier's terms prohibits reverse engineering to debug
+such modifications. See the LGPLv3 and GPLv3 texts in licenses/qtbase/.
+
+WinDivert 2.2.0-A is used unmodified under LGPLv3. See WinDivert-LICENSE.txt.
+Variant A identifies the upstream driver signature; it is not a Clumsier driver.
+
+cJSON 1.7.19 and the Tinted Theming palettes use MIT; see cJSON-LICENSE.txt and
+Tinted-Theming-LICENSE.txt. Palette author credits and the original YAML files
+are retained in the matching Clumsier source archive.
+
+The same release/download location must also offer the dependency-sources ZIP.
+It contains matching Qt Base, Qt Declarative, Qt Tools, and WinDivert source
+archives, plus their origin URLs and SHA-256 checksums. Clumsier's own source
+ZIP includes its build scripts, cJSON source, and palette sources. Building
+Clumsier does not require rebuilding Qt or the signed WinDivert driver.
+
+Microsoft runtime and DirectX components retain Microsoft's licenses. The
+included vc_redist.x64.exe is Microsoft's runtime installer, not a Clumsier
+installer. Its setup presents the applicable Microsoft terms.
+
+Upstream projects:
+https://www.qt.io/
+https://github.com/basil00/WinDivert
+https://github.com/DaveGamble/cJSON
+https://github.com/tinted-theming/schemes

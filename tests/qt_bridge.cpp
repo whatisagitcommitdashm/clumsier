@@ -13,6 +13,7 @@
 #include <QTimer>
 #include <QJSValue>
 #include <functional>
+#include <algorithm>
 #ifdef Q_OS_WIN
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -24,10 +25,10 @@
 struct FakeNetwork {
     bool running = false, reject = false;
     LagSettings accepted{};
-    int starts = 0, stops = 0;
+    int starts = 0, stops = 0, rejectStarts = 0;
     static bool start(void *context, const CaptureTarget *, const LagSettings *lag, char *error) {
         auto &self = *static_cast<FakeNetwork *>(context);
-        if (self.reject) { strcpy(error, "Test start rejected"); return false; }
+        if (self.reject || self.rejectStarts > 0) { if (self.rejectStarts > 0) --self.rejectStarts; strcpy(error, "Test start rejected"); return false; }
         ++self.starts; self.accepted = *lag; self.running = true; return true;
     }
     static bool apply(void *context, const LagSettings *lag, char *error) {
@@ -54,7 +55,7 @@ int main(int argc, char **argv) {
             QQmlApplicationEngine engine;
             engine.setInitialProperties({{"backend", QVariant::fromValue(&bridge)},
                 {"settingsLocation", QUrl::fromLocalFile(library.filePath("ui.ini"))}, {"page", "quick controls"}});
-            engine.load(QUrl::fromLocalFile(QStringLiteral(PREVIEW_QML_DIR "/Main.qml")));
+            engine.load(QUrl::fromLocalFile(QStringLiteral(BETA_QML_DIR "/Main.qml")));
             if (engine.rootObjects().isEmpty()) return 2;
             auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
             auto *hud = window->findChild<QQuickWindow *>("clumsierHud");
@@ -73,7 +74,92 @@ int main(int argc, char **argv) {
     }
     bool ok = true;
     auto check = [&](bool success, const char *message) { if (!success) { qCritical("FAIL: %s", message); ok = false; } };
+    {
+        QTemporaryDir edits;
+        FakeNetwork capture;
+        AppBridge bridge(capture.backend(), edits.path(), false);
+        check(bridge.quickDelay(50, 0) && bridge.execute(0), "Run before replacement test");
+        capture.rejectStarts = 1;
+        check(!bridge.quickDelay(200, 1) && capture.running && capture.accepted.inbound_ms == 50,
+            "Failed traffic restart restores previous running configuration");
+        check(bridge.state()["quickMs"] == 50 && bridge.state()["quickDirection"] == 0,
+            "Rejected restart keeps accepted UI values");
+        check(bridge.quickDelay(200, 1) && capture.running && capture.accepted.outbound_ms == 200,
+            "Changed traffic restarts into the new configuration");
+        capture.rejectStarts = 2;
+        check(!bridge.quickDelay(70, 0) && !capture.running && !bridge.error().isEmpty(),
+            "Failed replacement and rollback report stopped capture");
+        check(bridge.saveProfile("", "Recent server", 35), "Save recent server");
+        const QString server = bridge.profileId();
+        check(bridge.newPreset() && bridge.profileId() == server && bridge.save(), "New sequence defaults to recent server");
+        check(bridge.execute(0), "Start sequence for atomic edit test");
+        capture.reject = true;
+        check(!bridge.saveProfile(server, "Recent server", 100, false), "Rejected live baseline is not saved");
+        capture.reject = false; bridge.refresh();
+        check(bridge.profiles()[0].toMap()["baseline"] == 35, "Rejected live baseline retains stored value");
+        const QVariantMap original = bridge.draft();
+        auto invalid = original; invalid["name"] = "";
+        check(!bridge.commitDraft(invalid) && bridge.draft() == original && capture.running, "Invalid commit preserves draft and running state");
+        check(bridge.setBindingEnabled(0, false) && bridge.execute(1) && !bridge.executeHotkey(0), "Individual disabled hotkey cannot start");
+        check(bridge.execute(0), "Individual hotkey toggle does not disable mouse Start");
+        bridge.execute(1);
+        AppBridge reopened(capture.backend(), edits.path(), false);
+        check(!reopened.executeHotkey(0), "Individual hotkey preference survives reopen");
+        check(reopened.newPreset() && reopened.profileId() == server, "Recent server survives reopen");
+    }
     QString savedId, savedServerId;
+    {
+        QTemporaryDir starters, recipient;
+        FakeNetwork capture;
+        AppBridge bridge(capture.backend(), starters.path(), false);
+        check(bridge.installStarterPresets() && bridge.presets().size() == 3, "Fresh library receives three bundled sequences");
+        check(bridge.missingServers() == QStringList{"Mineplex"} && bridge.profiles().isEmpty(), "Starters request one personal baseline, never bundle the author's ping");
+        QStringList names;
+        for (const auto &entry : bridge.presets()) names.append(entry.toMap()["name"].toString());
+        check(names == QStringList{"Good Basic", "Pirate Bay", "Skylands"}, "Requested starter names are preserved");
+        const QString first = bridge.presets()[0].toMap()["id"].toString();
+        bridge.selectPreset(first);
+        check(!bridge.execute(0) && !capture.running, "Unconfigured starter cannot start");
+        check(!bridge.resolveServer("Mineplex", -1) && bridge.profiles().isEmpty(), "Invalid baseline creates no server");
+        bridge.clearError();
+        {
+            QQmlApplicationEngine engine;
+            engine.setInitialProperties({{"backend", QVariant::fromValue(&bridge)}, {"settingsLocation", QUrl::fromLocalFile(starters.filePath("ui.ini"))}});
+            engine.load(QUrl::fromLocalFile(QStringLiteral(BETA_QML_DIR "/Main.qml")));
+            QTest::qWait(600);
+            check(!engine.rootObjects().isEmpty(), "First-run shell loads");
+            if (!engine.rootObjects().isEmpty()) {
+                auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+                auto *dialog = window->findChild<QObject *>("baselineSetupDialog");
+                check(dialog && dialog->property("visible").toBool(), "First launch opens the server-baseline prompt");
+                if (qEnvironmentVariableIsSet("CLUMSIER_SCREENSHOTS")) {
+                    QDir().mkpath(qEnvironmentVariable("CLUMSIER_SCREENSHOTS"));
+                    window->grabWindow().save(qEnvironmentVariable("CLUMSIER_SCREENSHOTS") + "/starter-baseline.png");
+                }
+                check(bridge.resolveServer("Mineplex", 47), "Resolve shared server baseline");
+            }
+        }
+        check(bridge.missingServers().isEmpty() && bridge.profiles().size() == 1, "One baseline resolves all starter sequences");
+        for (const auto &entry : bridge.presets()) {
+            check(bridge.selectPreset(entry.toMap()["id"].toString()) && !bridge.profileId().isEmpty(), "Every starter uses the saved server");
+        }
+        check(bridge.installStarterPresets() && bridge.presets().size() == 3, "Starter installation is idempotent");
+        const QUrl exported = QUrl::fromLocalFile(starters.filePath("shared.json"));
+        check(bridge.exportPreset(exported), "Export portable server hint");
+        QFile shared(exported.toLocalFile()); shared.open(QIODevice::ReadOnly);
+        const QByteArray bytes = shared.readAll(); shared.close();
+        check(bytes.contains("Mineplex") && !bytes.contains("baseline"), "Shared JSON includes server name but not personal baseline");
+        AppBridge imported(capture.backend(), recipient.path(), false);
+        check(imported.importPreset(exported) && imported.missingServers() == QStringList{"Mineplex"}, "Unknown imported server requests baseline");
+        check(imported.resolveServer("Mineplex", 80) && imported.profiles().size() == 1, "Recipient supplies their own baseline");
+        check(imported.importPreset(exported) && imported.missingServers().isEmpty() && imported.profiles().size() == 1, "Known imported server reuses local baseline");
+        AppBridge reopened(capture.backend(), starters.path(), false);
+        check(reopened.missingServers().isEmpty() && reopened.selectPreset(first) && !reopened.profileId().isEmpty(), "Baseline and sequence association survive restart");
+        check(reopened.deletePreset() && reopened.installStarterPresets() && reopened.presets().size() == 2, "Deleted starters are not restored");
+        QTemporaryDir existing;
+        AppBridge established(capture.backend(), existing.path(), false);
+        check(established.newPreset() && established.save() && established.installStarterPresets() && established.presets().size() == 1, "Existing user libraries are left intact");
+    }
     {
         QTemporaryDir features;
         QString original;
@@ -188,7 +274,7 @@ int main(int argc, char **argv) {
         bool warnings = false;
         QObject::connect(&engine, &QQmlApplicationEngine::warnings, [&](const QList<QQmlError> &) { warnings = true; });
         engine.setInitialProperties({{"backend", QVariant::fromValue(&bridge)}, {"settingsLocation", QUrl::fromLocalFile(library.filePath("ui.ini"))}});
-        engine.load(QUrl::fromLocalFile(QStringLiteral(PREVIEW_QML_DIR "/Main.qml")));
+        engine.load(QUrl::fromLocalFile(QStringLiteral(BETA_QML_DIR "/Main.qml")));
         check(!engine.rootObjects().isEmpty(), "Production UI loads");
         if (!engine.rootObjects().isEmpty()) {
             auto *window = engine.rootObjects().first();
@@ -204,6 +290,17 @@ int main(int argc, char **argv) {
                 auto *item = find(quickWindow->contentItem(), name);
                 check(item != nullptr, name);
                 if (!item) return;
+                // Reach controls below the fold through the real scroll view.
+                for (auto *parent = item->parentItem(); parent; parent = parent->parentItem()) {
+                    if (!parent->property("contentY").isValid()) continue;
+                    const auto bounds = item->mapRectToItem(parent, item->boundingRect());
+                    if (bounds.top() < 0 || bounds.bottom() > parent->height()) {
+                        const double maximum = (std::max)(0.0, parent->property("contentHeight").toDouble() - parent->height());
+                        const double desired = parent->property("contentY").toDouble() + bounds.top() - 12;
+                        parent->setProperty("contentY", std::clamp(desired, 0.0, maximum));
+                        QTest::qWait(50);
+                    }
+                }
                 check(QRectF(0, 0, quickWindow->width(), quickWindow->height()).contains(item->mapRectToScene(item->boundingRect())), "Switch control stays inside window");
                 QTest::mouseClick(quickWindow, Qt::LeftButton, Qt::NoModifier,
                     item->mapToScene(QPointF(item->width()/2, item->height()/2)).toPoint());
@@ -221,13 +318,18 @@ int main(int argc, char **argv) {
                 check(bridge.state()["step"] == 0 && network.accepted.inbound_ms == 160, "Clicking row changes live step");
             }
             auto *targetField = find(quickWindow->contentItem(), "liveTargetField");
-            check(targetField && targetField->property("readOnly").toBool(), "Playback fields are read-only");
-            click("editSequenceButton");
-            check(network.running && window->property("switchingActivity").toBool(), "Edit asks before stopping playback");
-            click("cancelActivitySwitch");
-            check(network.running && targetField->property("readOnly").toBool(), "Cancel keeps playback and locked fields");
-            click("editSequenceButton"); click("confirmActivitySwitch");
-            check(!network.running && !targetField->property("readOnly").toBool(), "Confirmed Edit stops playback before unlocking fields");
+            check(targetField && !targetField->property("readOnly").toBool(), "Playback fields remain editable");
+            if (targetField) {
+                targetField->forceActiveFocus(); QTest::keyClick(quickWindow, Qt::Key_A, Qt::ControlModifier);
+                QTest::keyClick(quickWindow, Qt::Key_3); QTest::qWait(250);
+                check(network.accepted.inbound_ms == 160, "Intermediate target does not affect capture");
+                QTest::keyClick(quickWindow, Qt::Key_0); QTest::keyClick(quickWindow, Qt::Key_0);
+                QTest::keyClick(quickWindow, Qt::Key_Return); QTest::qWait(50);
+                check(network.running && network.accepted.inbound_ms == 260, "Leaving target field applies live delay");
+                bridge.discard();
+                check(network.accepted.inbound_ms == 160, "Discard restores the saved live configuration");
+            }
+            bridge.execute(1);
             auto *trafficButton = find(quickWindow->contentItem(), "trafficSettingsButton");
             check(trafficButton && !trafficButton->isVisible(), "Traffic settings hidden by default");
             auto *nameField = find(quickWindow->contentItem(), "sequenceNameField");
@@ -236,8 +338,9 @@ int main(int argc, char **argv) {
                 nameField->forceActiveFocus();
                 QTest::keyClick(quickWindow, Qt::Key_A, Qt::ControlModifier);
                 QTest::keyClick(quickWindow, Qt::Key_X);
-                check(bridge.dirty() && bridge.draft()["name"] == "x", "Typing edits the real draft");
-                check(!bridge.execute(3), "Playback shortcuts cannot advance a dirty draft");
+                QTest::keyClick(quickWindow, Qt::Key_Return);
+                check(bridge.dirty() && bridge.draft()["name"] == "x", "Finishing name edits the real draft");
+                check(bridge.execute(3), "Playback can advance with valid unsaved edits");
                 click("tab-quick controls");
                 click("cancelUnsavedSwitch");
                 check(window->property("page") == "sequences" && bridge.dirty(), "Cancel navigation retains draft and page");
@@ -291,7 +394,8 @@ int main(int argc, char **argv) {
                 QTest::keyClick(quickWindow, Qt::Key_5); QTest::qWait(450);
                 QTest::keyClick(quickWindow, Qt::Key_0); QTest::qWait(450);
                 check(quickField->property("text") == "250", "Slow typing survives multiple status refreshes");
-                check(bridge.state()["quickMs"] == 250, "Typing applies quick delay without a button");
+                QTest::keyClick(quickWindow, Qt::Key_Return);
+                check(bridge.state()["quickMs"] == 250, "Leaving field applies quick delay without a button");
                 auto enterDelay = [&](const char *value) {
                     quickField->forceActiveFocus();
                     QTest::keyClick(quickWindow, Qt::Key_A, Qt::ControlModifier);
@@ -299,22 +403,26 @@ int main(int argc, char **argv) {
                     for (const char *key = value; *key; ++key) QTest::keyClick(quickWindow, *key);
                     QTest::qWait(250);
                 };
-                auto *error = find(quickWindow->contentItem(), "quickDelayError");
                 enterDelay("");
-                check(bridge.state()["quickMs"] == 250 && error && error->isVisible(), "Empty input reports error and keeps accepted delay");
-                enterDelay("abc");
-                check(bridge.state()["quickMs"] == 250 && quickField->property("text") == "abc" && error->isVisible(), "Invalid text remains editable without changing delay");
-                enterDelay("15001");
-                check(bridge.state()["quickMs"] == 1500 && error->isVisible(), "Out-of-range input keeps last valid typed value");
-                enterDelay("250");
-                check(bridge.state()["quickMs"] == 250 && !error->isVisible(), "Valid input clears inline error");
+                check(bridge.state()["quickMs"] == 250 && quickField->property("text") == "", "Empty draft stays empty while focused");
+                QTest::keyClick(quickWindow, Qt::Key_Return);
+                check(bridge.state()["quickMs"] == 0 && quickField->property("text") == "0", "Empty field commits zero on blur");
+                click("quickDelayField"); QTest::qWait(30);
+                check(quickField->property("selectedText") == "0", "Entering zero selects it for replacement");
+                enterDelay("abc"); QTest::keyClick(quickWindow, Qt::Key_Return);
+                check(bridge.state()["quickMs"] == 0 && quickField->property("text") == "0" && !bridge.error().isEmpty(), "Invalid input restores accepted value and reports error");
+                enterDelay("15001"); QTest::keyClick(quickWindow, Qt::Key_Return);
+                check(bridge.state()["quickMs"] == 0, "Out-of-range input never becomes live");
+                enterDelay("250"); QTest::keyClick(quickWindow, Qt::Key_Return);
+                check(bridge.state()["quickMs"] == 250, "Valid field commits once");
                 check(bridge.execute(0), "Start capture for live delay editing");
                 enterDelay("0");
-                check(bridge.state()["running"].toBool() && bridge.state()["inbound"] == 0, "Zero applies immediately during capture");
+                check(network.accepted.inbound_ms == 250, "Live delay stays unchanged while typing");
+                QTest::keyClick(quickWindow, Qt::Key_Return);
+                check(network.running && network.accepted.inbound_ms == 0, "Zero applies when editing finishes");
                 auto *direction = find(quickWindow->contentItem(), "quickDelayDirection");
-                check(direction && !direction->isEnabled(), "Traffic direction stays locked during capture");
-                bridge.execute(1);
-                enterDelay("250");
+                check(direction && direction->isEnabled(), "Direction can be changed during capture");
+                bridge.execute(1); enterDelay("250"); QTest::keyClick(quickWindow, Qt::Key_Return);
             }
             click("showHudButton");
             auto *hud = window->findChild<QQuickWindow *>("clumsierHud");
@@ -394,42 +502,18 @@ int main(int argc, char **argv) {
                 check(!hud->isVisible() && network.running, "Hiding HUD does not stop capture");
                 bridge.execute(1); bridge.switchActivity("quick controls");
             }
-            check(bridge.execute(0), "Start before confirmation test");
+            check(bridge.execute(0), "Start before live switching test");
+            const int startsBeforeSwitch = network.starts;
             click("tab-sequences");
-            check(window->property("switchingActivity").toBool() && network.running && window->property("page") == "quick controls", "Confirmation precedes stop and navigation");
-            if (qEnvironmentVariableIsSet("CLUMSIER_SCREENSHOTS")) {
-                const QString directory = qEnvironmentVariable("CLUMSIER_SCREENSHOTS");
-                QDir().mkpath(directory);
-                quickWindow->grabWindow().save(directory + "/switch-confirmation.png");
-            }
-            click("cancelActivitySwitch");
-            check(network.running && window->property("page") == "quick controls", "Cancel preserves capture and page");
-            click("tab-sequences");
-            auto *warningCheck = find(quickWindow->contentItem(), "skipSwitchWarning");
-            auto *indicator = warningCheck ? warningCheck->property("indicator").value<QObject *>() : nullptr;
-            check(indicator != nullptr, "Checkbox has themed indicator");
-            if (indicator) {
-                const QVariant before = indicator->property("color");
-                const QPoint point = warningCheck->mapToScene(QPointF(8, warningCheck->height()/2)).toPoint();
-                QTest::mousePress(quickWindow, Qt::LeftButton, Qt::NoModifier, point);
-                QTest::qWait(100);
-                check(indicator->property("color") == before, "Checkbox press preserves themed fill");
-                QTest::mouseRelease(quickWindow, Qt::LeftButton, Qt::NoModifier, point);
-            }
-            click("confirmActivitySwitch");
-            check(!network.running && window->property("page") == "sequences" && bridge.state()["sequence"].toBool(), "Continue stops capture and arms selected sequence");
-            QSettings savedUi(library.filePath("ui.ini"), QSettings::IniFormat);
-            check(savedUi.value("shell/skipSwitchWarning").toBool(), "Warning opt-out written to persistent preferences");
-            check(bridge.execute(0) && network.accepted.inbound_ms == 160, "Start now uses selected sequence");
+            check(network.running && window->property("page") == "sequences" && !window->property("switchingActivity").toBool(), "Switch remains running without a warning");
+            check(network.accepted.inbound_ms == 160 && network.starts == startsBeforeSwitch, "Same-traffic switch updates delay without restart");
             click("tab-quick controls");
-            check(!network.running && !window->property("switchingActivity").toBool(), "Opt-out skips warning, not Stop");
-            // The selection itself also stops capture, even if the UI warning
-            // is suppressed. It cannot keep playing an old sequence snapshot.
+            check(network.running && network.accepted.inbound_ms == 250, "Quick controls switch stays running with remembered delay");
             check(bridge.switchActivity("sequences") && bridge.execute(0), "Restart selected sequence");
             check(bridge.importPreset(exported) && !network.running, "Selecting imported sequence stops capture");
-            check(bridge.profileId().isEmpty() && !bridge.state()["canStart"].toBool(), "Imported sequence needs its own local server");
+            check(bridge.profileId() == savedServerId && bridge.state()["canStart"].toBool(), "Imported sequence reuses a matching local server");
             bridge.selectProfile(savedServerId);
-            check(bridge.execute(0) && bridge.selectPreset(savedId) && !network.running, "Switch between saved sequences stops capture");
+            check(bridge.execute(0) && bridge.selectPreset(savedId) && network.running, "Switch between saved sequences keeps capture running");
             const QString copyId = bridge.presets()[0].toMap()["id"].toString() == savedId ? bridge.presets()[1].toMap()["id"].toString() : bridge.presets()[0].toMap()["id"].toString();
             check(bridge.selectPreset(copyId) && bridge.deletePreset() && bridge.selectPreset(savedId), "Remove switching-test copy");
             window->setProperty("page", "settings"); QTest::qWait(200);
@@ -485,6 +569,25 @@ int main(int argc, char **argv) {
                 check(list->property("contentY").toReal() > 0, "Sequence list scrolls independently");
                 list->setProperty("contentY", 0); QTest::qWait(100);
             }
+            check(find(quickWindow->contentItem(), "betaBadge") != nullptr, "Beta badge is visible in the main header");
+            QTest::keyClick(quickWindow, Qt::Key_F, Qt::ControlModifier); QTest::qWait(100);
+            auto *searchField = find(quickWindow->contentItem(), "sequenceSearchField");
+            check(searchField && searchField->hasActiveFocus(), "Ctrl+F focuses sequence search");
+            if (searchField) {
+                for (char key : QByteArray("no-such-sequence")) QTest::keyClick(quickWindow, key); QTest::qWait(100);
+                check(list && list->property("count").toInt() == 0, "Sequence search filters unmatched names");
+                QTest::keyClick(quickWindow, Qt::Key_A, Qt::ControlModifier); QTest::keyClick(quickWindow, Qt::Key_Backspace); QTest::qWait(100);
+                check(list && list->property("count").toInt() == bridge.presets().size(), "Clearing search restores the list");
+                QTest::keyClick(quickWindow, Qt::Key_Return);
+            }
+            click("sequenceSearchButton"); QTest::qWait(100);
+            const auto secondSearchId = bridge.presets()[1].toMap()["id"].toString();
+            QTest::keyClick(quickWindow, Qt::Key_Tab); QTest::qWait(50);
+            auto *secondSearchRow = find(quickWindow->contentItem(), "sequence-" + secondSearchId);
+            check(secondSearchRow && secondSearchRow->property("selected").toBool(), "Tab highlights the second search result");
+            QTest::keyClick(quickWindow, Qt::Key_Return); QTest::qWait(100);
+            check(bridge.selectedId() == secondSearchId && !window->property("searchOpen").toBool()
+                && list->property("count").toInt() == bridge.presets().size(), "Enter selects highlighted result and restores full list");
             const auto firstCopy = bridge.presets()[1].toMap()["id"].toString();
             const auto thirdCopy = bridge.presets()[3].toMap()["id"].toString();
             auto rowClick = [&](const QString &id, Qt::MouseButton button, Qt::KeyboardModifiers modifiers) {
@@ -509,6 +612,37 @@ int main(int argc, char **argv) {
             QStringList copies;
             for (const auto &entry : bridge.presets()) { const auto id = entry.toMap()["id"].toString(); if (id != savedId) copies.append(id); }
             check(bridge.batchSequences("delete", copies) && bridge.selectPreset(savedId), "Clean up batch test copies");
+            QMetaObject::invokeMethod(window, "saveHudPreference", Q_ARG(QVariant, "newSequenceShortcutEnabled"), Q_ARG(QVariant, false));
+            QTest::keyClick(quickWindow, Qt::Key_T, Qt::ControlModifier); QTest::qWait(50);
+            check(bridge.selectedId() == savedId && !bridge.dirty(), "Disabled Ctrl+T does not create a sequence");
+            QMetaObject::invokeMethod(window, "saveHudPreference", Q_ARG(QVariant, "newSequenceShortcutEnabled"), Q_ARG(QVariant, true));
+            QTest::keyClick(quickWindow, Qt::Key_T, Qt::ControlModifier); QTest::qWait(50);
+            check(bridge.selectedId().isEmpty() && bridge.dirty() && bridge.profileId() == savedServerId, "Ctrl+T creates a sequence with recent server");
+            bridge.discard(); bridge.selectPreset(savedId);
+            check(find(quickWindow->contentItem(), "feedbackButton") == nullptr, "Discord feedback handoff is removed");
+            window->setProperty("page", "hotkeys"); QTest::qWait(100);
+            click("hotkeysEnabledToggle");
+            auto *masterToggle = find(quickWindow->contentItem(), "hotkeysEnabledToggle");
+            check(masterToggle && masterToggle->property("text") == "Disabled" && !masterToggle->property("selected").toBool(), "Master toggle shows Disabled without highlight");
+            click("hotkeysEnabledToggle");
+            check(masterToggle && masterToggle->property("text") == "Enabled" && masterToggle->property("selected").toBool(), "Master toggle shows Enabled with highlight");
+            click("searchShortcutRecorder");
+            QTest::keyClick(quickWindow, Qt::Key_F, Qt::ControlModifier | Qt::ShiftModifier); QTest::qWait(50);
+            click("newSequenceShortcutRecorder");
+            QTest::keyClick(quickWindow, Qt::Key_T, Qt::ControlModifier | Qt::ShiftModifier); QTest::qWait(50);
+            QSettings localBindings(library.filePath("ui.ini"), QSettings::IniFormat);
+            check(localBindings.value("shell/searchShortcut").toString() == "Ctrl+Shift+F" && localBindings.value("shell/newSequenceShortcut").toString() == "Ctrl+Shift+T", "Recorded window shortcuts persist");
+            window->setProperty("page", "sequences"); QTest::qWait(100);
+            QTest::keyClick(quickWindow, Qt::Key_F, Qt::ControlModifier | Qt::ShiftModifier); QTest::qWait(100);
+            check(searchField && searchField->isVisible() && searchField->hasActiveFocus(), "Recorded search shortcut opens search");
+            QTest::keyClick(quickWindow, Qt::Key_Escape); QTest::qWait(100);
+            check(searchField && !searchField->isVisible(), "Escape tucks search away");
+            QTest::keyClick(quickWindow, Qt::Key_T, Qt::ControlModifier | Qt::ShiftModifier); QTest::qWait(100);
+            check(bridge.selectedId().isEmpty() && bridge.dirty(), "Recorded new-sequence shortcut works");
+            bridge.discard(); bridge.selectPreset(savedId);
+
+
+
         }
         check(!warnings, "Production UI has no QML warnings");
     }
@@ -521,13 +655,13 @@ int main(int argc, char **argv) {
         QQmlApplicationEngine restartedUi;
         restartedUi.setInitialProperties({{"backend", QVariant::fromValue(&reopened)},
             {"settingsLocation", QUrl::fromLocalFile(library.filePath("ui.ini"))}, {"page", "quick controls"}});
-        restartedUi.load(QUrl::fromLocalFile(QStringLiteral(PREVIEW_QML_DIR "/Main.qml")));
+        restartedUi.load(QUrl::fromLocalFile(QStringLiteral(BETA_QML_DIR "/Main.qml")));
         check(!restartedUi.rootObjects().isEmpty(), "Restarted UI loads");
         if (!restartedUi.rootObjects().isEmpty()) {
             auto *window = restartedUi.rootObjects().first();
             check(QMetaObject::invokeMethod(window, "requestSwitch", Q_ARG(QVariant, "page"), Q_ARG(QVariant, "sequences")), "Request switch after restart");
             QTest::qWait(100);
-            check(!network.running && window->property("page") == "sequences" && !window->property("switchingActivity").toBool(), "Opt-out survives restart and still stops capture");
+            check(network.running && window->property("page") == "sequences" && !window->property("switchingActivity").toBool(), "Live switching works after restart");
             check(reopened.state()["canStart"].toBool() && reopened.state()["expected"] == 200, "Restored server prepares correct sequence after restart");
             auto *quickWindow = qobject_cast<QQuickWindow *>(window);
             TextFocus textFocus(quickWindow);
@@ -540,16 +674,7 @@ int main(int argc, char **argv) {
             auto *traffic = find(quickWindow->contentItem(), "trafficSettingsButton");
             check(traffic && traffic->isVisible(), "Advanced mode survives restart");
             window->setProperty("page", "settings"); QTest::qWait(100);
-            auto *warning = find(quickWindow->contentItem(), "switchWarningSetting");
-            check(warning != nullptr, "Switch confirmation setting exists");
-            if (warning) {
-                QTest::mouseClick(quickWindow, Qt::LeftButton, Qt::NoModifier,
-                    warning->mapToScene(QPointF(8, warning->height()/2)).toPoint());
-                check(reopened.execute(0), "Start before restored warning check");
-                QMetaObject::invokeMethod(window, "requestSwitch", Q_ARG(QVariant, "page"), Q_ARG(QVariant, "quick controls"));
-                QTest::qWait(100);
-                check(window->property("switchingActivity").toBool() && network.running, "Settings restores switch confirmation");
-                QTest::keyClick(quickWindow, Qt::Key_Escape);
+            {
                 reopened.execute(1);
                 auto closingDraft = reopened.draft(); closingDraft["name"] = "Unsaved on close"; reopened.updateDraft(closingDraft);
                 quickWindow->close(); QTest::qWait(100);

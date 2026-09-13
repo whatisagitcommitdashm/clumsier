@@ -166,7 +166,7 @@ def main():
                       'Stop restores baseline. Close the GUI to remove the lab. Settings here are temporary.', flush=True)
                 monitor = sp.Popen(['ping', '-U', '-n', '-i', '1', '192.0.2.2'], env=ENV)
                 PINGS.append(monitor)
-                sp.run([str(ROOT / 'build/qt-linux/clumsier-ui-preview'), '--direct-helper'], env=gui_env, check=True)
+                sp.run([str(ROOT / 'build/qt-linux/clumsier-beta'), '--direct-helper'], env=gui_env, check=True)
                 check(tables() == original, 'Closing the Qt demo left private tables')
                 return
             if options.qt:

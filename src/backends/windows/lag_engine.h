@@ -2,7 +2,7 @@
 #include "core/network.h"
 #include "legacy/common.h"
 // Private Windows bridge to the inherited module scheduler. Settings are copied
-// under a Windows lock; packet processing never reads an IUP widget.
+// under a Windows lock; packet processing never reads a UI widget.
 extern short windowsLagEnabled;
 void windowsLagConfigure(const LagSettings *settings);
 void windowsLagStart(void);

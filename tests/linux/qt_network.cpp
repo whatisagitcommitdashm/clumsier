@@ -39,7 +39,7 @@ int main(int argc, char **argv) {
         QQmlApplicationEngine engine;
         engine.setInitialProperties({{"backend", QVariant::fromValue(&bridge)},
             {"settingsLocation", QUrl::fromLocalFile(library.filePath("ui.ini"))}, {"page", "quick controls"}});
-        engine.load(QUrl::fromLocalFile(QStringLiteral(PREVIEW_QML_DIR "/Main.qml")));
+        engine.load(QUrl::fromLocalFile(QStringLiteral(BETA_QML_DIR "/Main.qml")));
         check(!engine.rootObjects().isEmpty(), "Live QML loads");
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
         QTest::qWait(100);

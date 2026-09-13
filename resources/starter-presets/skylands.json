@@ -1,0 +1,37 @@
+{
+  "format_version": 1,
+  "name": "Skylands",
+  "description": "",
+  "effect": "lag",
+  "mode": "target_ping",
+  "policy": "inbound",
+  "loop": true,
+  "traffic": {
+    "protocol": "any",
+    "direction": "inbound",
+    "remote_address": "",
+    "remote_port": 0,
+    "native_backend": "",
+    "native_filter": ""
+  },
+  "steps": [
+    {
+      "name": "Base",
+      "note": "",
+      "type": "lowest"
+    },
+    {
+      "name": "Leap 1",
+      "note": "",
+      "type": "target",
+      "target_ms": 200
+    },
+    {
+      "name": "Leaps 3 & 4",
+      "note": "",
+      "type": "target",
+      "target_ms": 175
+    }
+  ],
+  "server": "Mineplex"
+}

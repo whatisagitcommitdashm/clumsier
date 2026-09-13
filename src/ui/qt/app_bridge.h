@@ -13,6 +13,7 @@ class AppBridge : public QObject {
     Q_OBJECT
     Q_PROPERTY(QVariantList presets READ presets NOTIFY libraryChanged)
     Q_PROPERTY(QVariantList profiles READ profiles NOTIFY libraryChanged)
+    Q_PROPERTY(QStringList missingServers READ missingServers NOTIFY libraryChanged)
     Q_PROPERTY(QVariantMap draft READ draft NOTIFY draftChanged)
     Q_PROPERTY(QString selectedId READ selectedId NOTIFY draftChanged)
     Q_PROPERTY(bool dirty READ dirty NOTIFY draftChanged)
@@ -29,6 +30,9 @@ public:
     ~AppBridge() override;
     QVariantList presets() const;
     QVariantList profiles() const;
+    QStringList missingServers() const;
+    bool installStarterPresets();
+    Q_INVOKABLE bool resolveServer(const QString &name, int baseline);
     QVariantMap draft() const;
     QString selectedId() const;
     bool dirty() const;
@@ -48,6 +52,9 @@ public:
     Q_INVOKABLE void refresh();
     Q_INVOKABLE bool selectPreset(const QString &id);
     Q_INVOKABLE bool newPreset();
+    Q_INVOKABLE bool commitDraft(const QVariantMap &value, int activeStep = -1);
+    Q_INVOKABLE bool setBindingEnabled(int action, bool enabled);
+    Q_INVOKABLE void invalidEntry() { fail("Invalid entry. The previous value was restored."); }
     Q_INVOKABLE void updateDraft(const QVariantMap &value);
     Q_INVOKABLE bool save();
     Q_INVOKABLE void discard();
@@ -55,7 +62,7 @@ public:
     Q_INVOKABLE bool deletePreset();
     Q_INVOKABLE bool importPreset(const QUrl &file);
     Q_INVOKABLE bool exportPreset(const QUrl &file);
-    Q_INVOKABLE bool saveProfile(const QString &id, const QString &name, int baseline);
+    Q_INVOKABLE bool saveProfile(const QString &id, const QString &name, int baseline, bool select = true);
     Q_INVOKABLE bool deleteProfile(const QString &id);
     Q_INVOKABLE bool selectProfile(const QString &id);
     Q_INVOKABLE bool loadSequence();
@@ -68,6 +75,7 @@ public:
     Q_INVOKABLE void cancelRecording();
     Q_INVOKABLE bool saveBinding(int action, const QString &text);
     Q_INVOKABLE void clearError();
+    Q_INVOKABLE QString shortcutForKey(int key, int modifiers) const;
 signals:
     void preferencesChanged();
     void libraryChanged();
@@ -80,9 +88,12 @@ private:
     std::unique_ptr<Data> d;
     bool fail(const QString &message);
     void prepareSequence();
+    bool applySequence(const QVariantMap &value, const QString &profile, size_t step = 0);
     bool storeServerAssociation();
     void restoreServerAssociation();
     bool savePreference(const QString &key, bool value);
     void updateHotkeyPause();
+    QString matchingProfile(const QString &name) const;
+    QString serverName(const QString &profileId) const;
     static AppBridge *listenerOwner;
 };

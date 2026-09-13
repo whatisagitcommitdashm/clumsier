@@ -19,7 +19,7 @@ TextField {
         event.accepted = false;
         Qt.callLater(function() { if (field.activeFocus) { field.focus = false; field.Window.window.contentItem.forceActiveFocus(); } });
     }
-    onAccepted: field.Window.window.contentItem.forceActiveFocus()
+    onAccepted: { field.focus = false; field.Window.window.contentItem.forceActiveFocus(); }
     background: Rectangle {
         radius: 5
         color: field.theme.surface

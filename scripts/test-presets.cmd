@@ -28,15 +28,4 @@ cl /nologo /std:c11 /W4 /WX /D_CRT_SECURE_NO_WARNINGS /DCJSON_NESTING_LIMIT=32 /
 if errorlevel 1 exit /b 1
 build\tests\preset-store.exe
 if errorlevel 1 exit /b 1
-cl /nologo /std:c11 /W3 /D_CRT_SECURE_NO_WARNINGS /DCJSON_NESTING_LIMIT=32 /Isrc /Isrc\platform\windows /Isrc\backends\windows\legacy /Iexternal\iup-3.30_Win64_dll16_lib\include /Iexternal\WinDivert-2.2.0-A\include /Fobuild\tests\ /Febuild\tests\preset-ui.exe tests\preset_ui.c src\core\controller.c src\core\network.c src\core\preset.c src\core\preset_json.c src\platform\windows\preset_store.c src\backends\windows\backend.c external\cjson\cJSON.c /link /LIBPATH:external\iup-3.30_Win64_dll16_lib /LIBPATH:external\WinDivert-2.2.0-A\x64 iup.lib WinDivert.lib ws2_32.lib shell32.lib ole32.lib uuid.lib
-if errorlevel 1 exit /b 1
-copy /y external\iup-3.30_Win64_dll16_lib\iup.dll build\tests\ >nul
-if errorlevel 1 exit /b 1
-copy /y external\WinDivert-2.2.0-A\x64\WinDivert.dll build\tests\ >nul
-if errorlevel 1 exit /b 1
-build\tests\preset-ui.exe
-if errorlevel 1 exit /b 1
-cl /nologo /std:c11 /W3 /D_CRT_SECURE_NO_WARNINGS /DCJSON_NESTING_LIMIT=32 /Isrc /Isrc\core /Isrc\platform\windows /Isrc\backends\windows\legacy /Iexternal\iup-3.30_Win64_dll16_lib\include /Iexternal\WinDivert-2.2.0-A\include /Fobuild\tests\ /Febuild\tests\view-ui.exe tests\view_ui.c src\core\*.c src\ui\lag_controls.c src\ui\preset_editor.c src\ui\sequence_controls.c src\backends\windows\*.c src\backends\windows\legacy\*.c src\platform\windows\*.c external\cjson\cJSON.c /link /LIBPATH:external\iup-3.30_Win64_dll16_lib /LIBPATH:external\WinDivert-2.2.0-A\x64 iup.lib WinDivert.lib comctl32.lib winmm.lib ws2_32.lib shell32.lib advapi32.lib user32.lib gdi32.lib comdlg32.lib ole32.lib uuid.lib
-if errorlevel 1 exit /b 1
-build\tests\view-ui.exe
-exit /b %errorlevel%
+exit /b 0

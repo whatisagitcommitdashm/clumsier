@@ -1,36 +1,11 @@
 #pragma once
 #include <stdio.h>
 #include <assert.h>
-#ifdef CLUMSIER_LAG_ONLY
-typedef struct Ihandle_ Ihandle; // Opaque legacy slots; the Qt target never uses them.
-#else
-#include "iup.h"
-#endif
 #include "windivert.h"
 
-#define CLUMSY_VERSION "0.3"
 #define MSG_BUFSIZE 512
 #define FILTER_BUFSIZE 1024
-#define NAME_SIZE 16
-#ifdef CLUMSIER_LAG_ONLY
 #define MODULE_CNT 1
-#else
-#define MODULE_CNT 8
-#endif
-#define ICON_UPDATE_MS 200
-
-#define CONTROLS_HANDLE "__CONTROLS_HANDLE"
-#define SYNCED_VALUE "__SYNCED_VALUE"
-#define INTEGER_MAX "__INTEGER_MAX"
-#define INTEGER_MIN "__INTEGER_MIN"
-#define FIXED_MAX "__FIXED_MAX"
-#define FIXED_MIN "__FIXED_MIN"
-#define FIXED_EPSILON 0.01
-
-// workaround stupid vs2012 runtime check.
-// it would show even when seeing explicit "(short)(i);"
-#define I2S(x) ((short)((x) & 0xFFFF))
-
 
 #ifdef __MINGW32__
 #define INLINE_FUNCTION __inline__
@@ -118,15 +93,7 @@ PacketNode* insertAfter(PacketNode *node, PacketNode *target);
 PacketNode* appendNode(PacketNode *node);
 short isListEmpty();
 
-// shared ui handlers
-int uiSyncChance(Ihandle *ih);
-int uiSyncToggle(Ihandle *ih, int state);
-int uiSyncInteger(Ihandle *ih);
-int uiSyncFixed(Ihandle *ih);
-int uiSyncInt32(Ihandle *ih);
-
-
-// module
+// Packet processing callbacks
 typedef struct {
     /*
      * Static module data
@@ -134,7 +101,6 @@ typedef struct {
     const char *displayName; // display name shown in ui
     const char *shortName; // single word name
     short *enabledFlag; // volatile short flag to determine enabled or not
-    Ihandle* (*setupUIFunc)(); // return hbox as controls group
     void (*startUp)(); // called when starting up the module
     void (*closeDown)(PacketNode *head, PacketNode *tail); // called when starting up the module
     short (*process)(PacketNode *head, PacketNode *tail);
@@ -143,17 +109,9 @@ typedef struct {
      */
     short lastEnabled; // if it is enabled on last run
     short processTriggered; // whether this module has been triggered in last step 
-    Ihandle *iconHandle; // store the icon to be updated
 } Module;
 
 extern Module lagModule;
-extern Module dropModule;
-extern Module throttleModule;
-extern Module oodModule;
-extern Module dupModule;
-extern Module tamperModule;
-extern Module resetModule;
-extern Module bandwidthModule;
 extern Module* modules[MODULE_CNT]; // all modules in a list
 
 // status for sending packets, 
@@ -163,20 +121,11 @@ extern Module* modules[MODULE_CNT]; // all modules in a list
 extern volatile short sendState;
 
 
-// Iup GUI
-void showStatus(const char* line);
 
 // WinDivert
 int divertStart(const char * filter, char buf[]);
 void divertStop();
 BOOL divertIsRunning(void);
-
-// utils
-// STR to convert int macro to string
-#define STR_HELPER(x) #x
-#define STR(x) STR_HELPER(x)
-
-short calcChance(short chance);
 
 // inline helper for inbound outbound check
 static INLINE_FUNCTION
@@ -189,16 +138,3 @@ BOOL checkDirection(BOOL outboundPacket, short handleInbound, short handleOutbou
 #define TIMER_RESOLUTION 4
 void startTimePeriod();
 void endTimePeriod();
-
-// elevate
-BOOL IsElevated();
-BOOL IsRunAsAdmin();
-BOOL tryElevate(HWND hWnd, BOOL silent);
-
-// icons
-extern const unsigned char icon8x8[8*8];
-
-// parameterized
-extern BOOL parameterized;
-void setFromParameter(Ihandle *ih, const char *field, const char *key);
-BOOL parseArgs(int argc, char* argv[]);

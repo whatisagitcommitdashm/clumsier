@@ -17,7 +17,7 @@ static HotkeyActionCallback actionCallback;
 static HotkeyRecordCallback recordCallback;
 static unsigned int pauseDepth;
 
-// The listener never runs application actions or touches IUP. Always forwarding
+// The listener never runs application actions or touches UI controls. Always forwarding
 // the original event lets other active apps receive both presses and releases normally.
 static LRESULT CALLBACK keyboardHook(int code, WPARAM message, LPARAM data) {
     if (code == HC_ACTION) {
@@ -140,7 +140,7 @@ BOOL hotkeysOpen(HotkeyActionCallback callback, char *error) {
     windowClass.lpszClassName = L"ClumsierHotkeys";
     if (!RegisterClassW(&windowClass) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) goto failed;
     // HWND_MESSAGE gives us a message destination without another visible window.
-    // IUP's event loop dispatches its messages on this same thread.
+    // The UI event loop dispatches its messages on this same thread.
     messageWindow = CreateWindowExW(0, windowClass.lpszClassName, L"", 0,
         0, 0, 0, 0, HWND_MESSAGE, NULL, windowClass.hInstance, NULL);
     if (!messageWindow) goto failed;

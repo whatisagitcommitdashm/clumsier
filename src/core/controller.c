@@ -110,3 +110,34 @@ bool controllerExecute(AppController *app, AppAction action, char *error) {
 void controllerShutdown(AppController *app) {
     app->backend.ops->stop(app->backend.context);
 }
+
+bool controllerReplacePreset(AppController *app, const Preset *preset, bool has_baseline,
+    uint32_t baseline_ms, size_t step, char *error) {
+    StepResult resolved, checked;
+    size_t i;
+    bool running = controllerIsRunning(app);
+    if (!presetValidate(preset, error)) return false;
+    for (i = 0; i < preset->step_count; ++i)
+        if (!presetResolve(preset, i, has_baseline, baseline_ms, &checked, error)) return false;
+    if (!presetResolve(preset, step, has_baseline, baseline_ms, &resolved, error)) return false;
+    if (running && !captureTargetsEqual(&app->target, &preset->target)) {
+        app->backend.ops->stop(app->backend.context);
+        if (!app->backend.ops->start(app->backend.context, &preset->target, &resolved.lag, error)) {
+            char rollback[NETWORK_ERROR_SIZE] = {0};
+            // start must clean up partial failure; explicitly stop before retrying.
+            app->backend.ops->stop(app->backend.context);
+            if (!app->backend.ops->start(app->backend.context, &app->target, &app->lag, rollback))
+                strcpy(error, "The new configuration failed, and the previous capture could not restart. Capture is stopped.");
+            return false;
+        }
+    } else if (running && !app->backend.ops->apply_lag(app->backend.context, &resolved.lag, error)) return false;
+    app->preset = *preset;
+    app->target = preset->target;
+    app->lag = resolved.lag;
+    app->step_result = resolved;
+    app->active_step = step;
+    app->has_baseline = has_baseline;
+    app->baseline_ms = baseline_ms;
+    app->preset_loaded = true;
+    return true;
+}

@@ -60,7 +60,8 @@ bool presetParse(const char *json, size_t length, Preset *preset, char *error) {
     if (strstr(copy, "\\u0000")) goto invalid;
     root = cJSON_ParseWithLengthOpts(copy, length + 1, NULL, 1);
     free(copy); copy = NULL;
-    if (!fields(root, "|format_version|name|description|effect|mode|policy|loop|traffic|steps|")) goto invalid;
+    if (!fields(root, "|format_version|name|description|server|effect|mode|policy|loop|traffic|steps|")) goto invalid;
+    if (get(root, "server") && !stringField(root, "server", parsed.server, sizeof(parsed.server))) goto invalid;
     if (!numberField(root, "format_version", &version, 1) || version != 1 ||
         !stringField(root, "effect", effect, sizeof(effect)) || strcmp(effect, "lag") ||
         !stringField(root, "name", parsed.name, sizeof(parsed.name)) ||
@@ -112,6 +113,7 @@ char *presetSerialize(const Preset *preset, char *error) {
 #define STRING(o,k,v) if (!cJSON_AddStringToObject(o,k,v)) goto failed
 #define NUMBER(o,k,v) if (!cJSON_AddNumberToObject(o,k,v)) goto failed
     NUMBER(root,"format_version",1); STRING(root,"name",preset->name); STRING(root,"description",preset->description);
+    if (preset->server[0]) { STRING(root,"server",preset->server); }
     STRING(root,"effect","lag"); STRING(root,"mode",preset->mode == PRESET_TARGET_PING ? "target_ping" : "added_delay");
     STRING(root,"policy",policies[preset->policy]);
     if (!cJSON_AddBoolToObject(root,"loop",preset->loop)) goto failed;

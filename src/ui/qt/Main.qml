@@ -8,7 +8,7 @@ import "ThemeCatalog.js" as Catalog
 
 ApplicationWindow {
     id: window
-    objectName: "previewWindow"
+    objectName: "clumsierWindow"
     width: 1180
     height: 780
     minimumWidth: 760
@@ -17,7 +17,7 @@ ApplicationWindow {
     flags: Qt.Window | Qt.FramelessWindowHint | Qt.WindowMinMaxButtonsHint | Qt.WindowCloseButtonHint
     title: backend ? "Clumsier" : "Clumsier — UI prototype"
     property var backend: null
-    readonly property bool inputPaused: sequenceMenu.visible || deleteSequencesDialog.visible || batchExport.visible || switchDialog.visible || unsavedDialog.visible || themePicker.visible || (active && (page === "hotkeys" || !!activeFocusItem && (activeFocusItem instanceof TextInput || activeFocusItem instanceof TextEdit))) || (liveLoader.item ? liveLoader.item.dialogOpen : false)
+    readonly property bool inputPaused: sequenceMenu.visible || deleteSequencesDialog.visible || batchExport.visible || unsavedDialog.visible || themePicker.visible || (active && (page === "hotkeys" || !!activeFocusItem && (activeFocusItem instanceof TextInput || activeFocusItem instanceof TextEdit))) || (liveLoader.item ? liveLoader.item.dialogOpen : false)
     onInputPausedChanged: if (backend) backend.setInputPaused(inputPaused)
     onClosing: function(event) {
         if (backend && backend.dirty) {
@@ -72,7 +72,7 @@ ApplicationWindow {
         }
         onClosed: themeButton.forceActiveFocus(Qt.PopupFocusReason)
     }
-    // These settings belong to the preview, never the real application's profiles.
+    // UI preferences are stored separately from the sequence library.
     Settings {
         id: preferences
         location: window.settingsLocation
@@ -83,7 +83,10 @@ ApplicationWindow {
         property real uiScale: 1
         property string themeId: "lavender"
         property string favoriteThemeIds: "[]"
-        property bool skipSwitchWarning: false
+        property bool newSequenceShortcutEnabled: true
+        property bool searchShortcutEnabled: true
+        property string newSequenceShortcut: "Ctrl+T"
+        property string searchShortcut: "Ctrl+F"
         property bool advancedMode: false
         property bool showHud: false
         property real hudScale: 1
@@ -109,9 +112,39 @@ ApplicationWindow {
     property string pendingValue: ""
     property var selectedSequenceIds: []
     property string selectionAnchor: ""
+    property string sequenceSearch: ""
+    property bool searchOpen: false
+    property int searchIndex: 0
+    onSequenceSearchChanged: { searchIndex = 0; Qt.callLater(function() { sequenceList.positionViewAtBeginning(); }); }
+    function moveSearchSelection(delta) {
+        if (!filteredPresets.length) return;
+        searchIndex = (searchIndex + delta + filteredPresets.length) % filteredPresets.length;
+        sequenceList.positionViewAtIndex(searchIndex, ListView.Contain);
+    }
+    function selectSearchResult() {
+        if (!filteredPresets.length) return;
+        const id = filteredPresets[Math.min(searchIndex, filteredPresets.length - 1)].id;
+        chooseSequence(id, Qt.NoModifier);
+        closeSearch();
+    }
+    function closeSearch() { sequenceSearch = ""; searchOpen = false; sidebar.forceActiveFocus(); }
+    function openSequenceSearch() {
+        if (window.activeFocusItem) window.activeFocusItem.focus = false;
+        if (page !== "sequences") requestSwitch("page", "sequences");
+        if (page !== "sequences") return;
+        sidebarReveal = "keyboard"; searchIndex = 0; searchOpen = true;
+        Qt.callLater(function() { sequenceSearchField.forceActiveFocus(); sequenceSearchField.selectAll(); });
+    }
+    function setLocalShortcut(kind, shortcut) {
+        const other = kind === "search" ? preferences.newSequenceShortcut : preferences.searchShortcut;
+        if (shortcut === other || shortcut === "Ctrl+B") { inform("That shortcut is already used in this window."); return; }
+        saveHudPreference(kind === "search" ? "searchShortcut" : "newSequenceShortcut", shortcut);
+    }
+    readonly property bool localShortcutsAvailable: !!backend && !themePicker.visible && !unsavedDialog.visible && !sequenceMenu.visible && !deleteSequencesDialog.visible && !(liveLoader.item && (liveLoader.item.dialogOpen || liveLoader.item.localShortcutRecording))
+    readonly property var filteredPresets: backend ? backend.presets.filter(function(p) { return p.name.toLowerCase().includes(sequenceSearch.toLowerCase()); }) : []
     property var batchIds: []
     function chooseSequence(id, modifiers) {
-        const ids = backend.presets.map(function(p) { return p.id; });
+        const ids = filteredPresets.map(function(p) { return p.id; });
         if ((modifiers & Qt.ShiftModifier) && ids.includes(selectionAnchor)) {
             const a = ids.indexOf(selectionAnchor), b = ids.indexOf(id);
             selectedSequenceIds = ids.slice(Math.min(a, b), Math.max(a, b) + 1);
@@ -136,6 +169,7 @@ ApplicationWindow {
     }
     Connections {
         target: window.backend
+        function onErrorChanged() { if (backend.error !== "") window.inform(backend.error); }
         function onLibraryChanged() {
             const ids = backend.presets.map(function(p) { return p.id; });
             selectedSequenceIds = selectedSequenceIds.filter(function(id) { return ids.includes(id); });
@@ -188,11 +222,11 @@ ApplicationWindow {
             Caption { text: backend ? backend.error : ""; visible: text !== ""; Layout.fillWidth: true; color: appTheme.accent }
         }
     }
-    readonly property bool switchingActivity: switchDialog.visible
+    readonly property bool switchingActivity: false
     function clearPendingSwitch() { pendingSwitch = ""; pendingValue = ""; }
     function requestSwitch(kind, value) {
         if (!backend) { if (kind === "page") page = value; return; }
-        if (switchDialog.visible || unsavedDialog.visible) return;
+        if (unsavedDialog.visible) return;
         if (kind === "page" && value === page) return;
         if (kind === "sequence" && value === backend.selectedId && backend.state.activity === "sequences") return;
         pendingSwitch = kind; pendingValue = value;
@@ -203,20 +237,13 @@ ApplicationWindow {
         if (backend.dirty && kind !== "edit") unsavedDialog.open();
         else continueSwitch();
     }
-    function continueSwitch() {
-        const changesActivity = pendingSwitch !== "batch-duplicate" && pendingSwitch !== "batch-export" && (pendingSwitch !== "page"
-            || (pendingValue !== "hotkeys" && pendingValue !== "settings" && pendingValue !== backend.state.activity));
-        if (backend.state.running && changesActivity && !preferences.skipSwitchWarning) {
-            suppressSwitchWarning.checked = false;
-            switchDialog.open();
-        } else completeSwitch();
-    }
+    function continueSwitch() { completeSwitch(); }
     function completeSwitch() {
         const kind = pendingSwitch, value = pendingValue;
         let changed = false;
         if (kind === "page") changed = (value === "hotkeys" || value === "settings") || backend.switchActivity(value);
         else if (kind === "sequence") changed = backend.selectPreset(value);
-        else if (kind === "new") changed = backend.newPreset();
+        else if (kind === "new") { sequenceSearch = ""; changed = backend.newPreset(); }
         else if (kind === "duplicate") changed = backend.duplicate();
         else if (kind === "import") changed = backend.importPreset(value);
         else if (kind === "batch-duplicate") backend.batchSequences("duplicate", JSON.parse(value));
@@ -225,7 +252,7 @@ ApplicationWindow {
             if (backend.execute(1)) { batchIds = JSON.parse(value); confirmSequenceDeletion(); }
         }
         else if (kind === "edit" || kind === "delete") {
-            if (backend.execute(1) && liveLoader.item) {
+            if (liveLoader.item) {
                 if (kind === "edit") liveLoader.item.beginEditing(value);
                 else { batchIds = [backend.selectedId]; confirmSequenceDeletion(); }
             }
@@ -251,45 +278,6 @@ ApplicationWindow {
             }
         }
     }
-    QuietDialog {
-        theme: appTheme
-        id: switchDialog
-        parent: Overlay.overlay
-        anchors.centerIn: parent
-        width: Math.min(470 * appTheme.scale, parent.width - 32)
-        modal: true
-        title: pendingSwitch === "edit" ? "Stop and edit?" : "Stop and switch?"
-        closePolicy: Popup.CloseOnEscape
-        background: Rectangle { color: appTheme.surface; radius: 8; border.color: appTheme.border }
-        onRejected: { pendingSwitch = ""; pendingValue = ""; }
-        contentItem: ColumnLayout {
-            spacing: 18
-            Caption {
-                Layout.fillWidth: true
-                Layout.preferredWidth: 0
-                text: pendingSwitch === "edit" ? "Editing will stop the current network delay. Save your changes, then press Start when you’re ready to use the sequence." : "Switching will stop the current network delay and select the new controls or sequence. Press Start when you’re ready to use it."
-            }
-            QuietCheckBox { theme: appTheme; id: suppressSwitchWarning; objectName: "skipSwitchWarning"; text: "Don’t show this message again"; Layout.fillWidth: true }
-            RowLayout {
-                Layout.fillWidth: true
-                Layout.alignment: Qt.AlignRight
-                Item { Layout.fillWidth: true }
-                QuietButton { objectName: "cancelActivitySwitch"; theme: appTheme; text: "Cancel"; onClicked: switchDialog.reject() }
-                QuietButton {
-                    objectName: "confirmActivitySwitch"; theme: appTheme; text: "Continue"
-                    onClicked: {
-                        if (suppressSwitchWarning.checked) {
-                            preferences.skipSwitchWarning = true;
-                            preferences.setValue("skipSwitchWarning", true); preferences.sync();
-                        }
-                        completeSwitch(); switchDialog.close();
-                    }
-                }
-            }
-        }
-    }
-    onActiveChanged: if (!active) { closeSidebar(); if (backend) backend.cancelRecording(); }
-    // Mouse peeks ignore incidental focus from clicks; keyboard opens stay until dismissed.
     property string sidebarReveal: "closed"
     readonly property bool sidebarRevealed: sidebarReveal !== "closed"
     readonly property bool sidebarOpen: !preferences.compactSidebar || sidebarRevealed
@@ -350,10 +338,20 @@ ApplicationWindow {
         inform("Sample sequence selected. No files are changed.");
     }
     Timer { id: noticeTimer; interval: 4500; onTriggered: notice = "" }
+    Shortcut {
+        sequence: preferences.searchShortcut; context: Qt.WindowShortcut
+        enabled: window.localShortcutsAvailable && preferences.searchShortcutEnabled
+        onActivated: window.openSequenceSearch()
+    }
+    Shortcut {
+        sequence: preferences.newSequenceShortcut; context: Qt.WindowShortcut; autoRepeat: false
+        enabled: window.localShortcutsAvailable && preferences.newSequenceShortcutEnabled
+        onActivated: { if (window.activeFocusItem) window.activeFocusItem.focus = false; window.contentItem.forceActiveFocus(); requestSwitch("new", ""); }
+    }
     Shortcut { enabled: !backend && !themePicker.visible; sequence: "F7"; autoRepeat: false; onActivated: toggleRunning() }
     Shortcut { enabled: !backend && !themePicker.visible; sequence: "F8"; autoRepeat: false; onActivated: advance() }
     Shortcut {
-        enabled: !themePicker.visible && !switchDialog.visible && !unsavedDialog.visible && !(liveLoader.item && liveLoader.item.dialogOpen)
+        enabled: !themePicker.visible && !unsavedDialog.visible && !(liveLoader.item && (liveLoader.item.dialogOpen || liveLoader.item.localShortcutRecording))
         sequence: "Ctrl+B"
         onActivated: {
             if (!preferences.compactSidebar) {
@@ -366,7 +364,7 @@ ApplicationWindow {
             }
         }
     }
-    Shortcut { enabled: !themePicker.visible && !switchDialog.visible && !unsavedDialog.visible && !(liveLoader.item && liveLoader.item.dialogOpen); sequence: "Escape"; onActivated: { window.contentItem.forceActiveFocus(); closeSidebar(); } }
+    Shortcut { enabled: !themePicker.visible && !unsavedDialog.visible && !(liveLoader.item && (liveLoader.item.dialogOpen || liveLoader.item.localShortcutRecording)); sequence: "Escape"; onActivated: { window.contentItem.forceActiveFocus(); closeSidebar(); } }
 
     // Let the OS perform moving/resizing, including screen-edge snapping.
     MouseArea {
@@ -402,7 +400,13 @@ ApplicationWindow {
             Layout.preferredHeight: (stacked ? 112 : 72) * appTheme.scale
             columnSpacing: 22
             rowSpacing: 0
-            Label { text: "clumsier"; color: appTheme.text; font.pixelSize: 25 * appTheme.scale; Layout.row: 0; Layout.column: 0 }
+            Item {
+                Layout.row: 0; Layout.column: 0
+                implicitWidth: wordmark.implicitWidth + 34 * appTheme.scale
+                implicitHeight: 44 * appTheme.scale
+                Label { id: wordmark; text: "clumsier"; color: appTheme.text; font.pixelSize: 25 * appTheme.scale; anchors.verticalCenter: parent.verticalCenter }
+                Label { objectName: "betaBadge"; text: "beta!"; color: appTheme.accent; font.pixelSize: 11 * appTheme.scale; rotation: 45; x: wordmark.implicitWidth - 2 * appTheme.scale; y: 1 * appTheme.scale }
+            }
             RowLayout {
                 Layout.fillWidth: true
                 Layout.row: header.stacked ? 1 : 0
@@ -492,6 +496,13 @@ ApplicationWindow {
                             Layout.fillWidth: true; Layout.leftMargin: 32; Layout.rightMargin: 32
                             sourceComponent: LiveWorkspace {
                                 bridge: window.backend; theme: appTheme; page: window.page; advancedMode: preferences.advancedMode
+                                newSequenceShortcutEnabled: preferences.newSequenceShortcutEnabled
+                                searchShortcutEnabled: preferences.searchShortcutEnabled
+                                newSequenceShortcut: preferences.newSequenceShortcut
+                                searchShortcut: preferences.searchShortcut
+                                onSearchShortcutToggled: function(enabled) { window.saveHudPreference("searchShortcutEnabled", enabled); }
+                                onLocalShortcutChanged: function(kind, shortcut) { window.setLocalShortcut(kind, shortcut); }
+                                onNewSequenceShortcutToggled: function(enabled) { window.saveHudPreference("newSequenceShortcutEnabled", enabled); }
                                 onSwitchRequested: function(kind, value) { window.requestSwitch(kind, value); }
                             }
                         }
@@ -648,10 +659,6 @@ ApplicationWindow {
                                 onToggled: { preferences.advancedMode = checked; preferences.setValue("advancedMode", checked); preferences.sync(); }
                             }
                             QuietCheckBox {
-                                objectName: "switchWarningSetting"; theme: appTheme; text: "Confirm before switching a running activity"; helpText: "Ask before stopping a running delay to change pages, sequences, or edit settings."; checked: !preferences.skipSwitchWarning
-                                onToggled: { preferences.skipSwitchWarning = !checked; preferences.setValue("skipSwitchWarning", !checked); preferences.sync(); }
-                            }
-                            QuietCheckBox {
                                 objectName: "autoSaveSetting"; visible: !!backend; theme: appTheme; text: "Autosave sequences"
                                 helpText: "Save valid edits after a brief pause in typing. Invalid entries stay editable without replacing the saved sequence."
                                 checked: backend ? backend.autoSave : false; onToggled: backend.autoSave = checked
@@ -751,29 +758,52 @@ ApplicationWindow {
                             onClicked: { preferences.compactSidebar = !preferences.compactSidebar; closeSidebar() }
                         }
                         Caption { text: "sequences"; Layout.fillWidth: true }
+                        QuietButton {
+                            objectName: "sequenceSearchButton"; theme: appTheme; subtle: true; transparentIdle: preferences.compactSidebar
+                            implicitWidth: 28; implicitHeight: 28; selected: window.searchOpen
+                            Accessible.name: "Search sequences"; helpText: "Search sequences · " + preferences.searchShortcut
+                            onClicked: window.searchOpen ? window.closeSearch() : window.openSequenceSearch()
+                            contentItem: Item {
+                                implicitWidth: 16; implicitHeight: 16
+                                Rectangle { x: 1; y: 1; width: 10; height: 10; radius: 5; color: "transparent"; border.width: 1.5; border.color: appTheme.muted }
+                                Rectangle { x: 10; y: 10; width: 7; height: 1.5; rotation: 45; transformOrigin: Item.Left; color: appTheme.muted }
+                            }
+                        }
+                    }
+                    QuietField {
+                        id: sequenceSearchField; objectName: "sequenceSearchField"; theme: appTheme
+                        Layout.fillWidth: true; visible: window.searchOpen; placeholderText: "Search sequences"
+                        onActiveFocusChanged: if (!activeFocus && text === "") window.searchOpen = false
+                        Keys.onEscapePressed: window.closeSearch()
+                        Keys.onTabPressed: window.moveSearchSelection(1)
+                        Keys.onBacktabPressed: window.moveSearchSelection(-1)
+                        Keys.onReturnPressed: window.selectSearchResult()
+                        Keys.onEnterPressed: window.selectSearchResult()
+                        text: window.sequenceSearch; onTextEdited: window.sequenceSearch = text
                     }
                     ListView {
                         id: sequenceList; objectName: "sequenceList"
                         Layout.fillWidth: true; Layout.fillHeight: true
                         Layout.preferredHeight: contentHeight
                         clip: true; spacing: 8; boundsBehavior: Flickable.StopAtBounds
-                        model: backend ? backend.presets : ["Utopia", "Bridge practice", "Custom sequence"]
+                        model: backend ? filteredPresets : ["Utopia", "Bridge practice", "Custom sequence"]
                         ScrollBar.vertical: ScrollBar {
                             visible: sequenceList.contentHeight > sequenceList.height
                             contentItem: Rectangle { implicitWidth: 4; radius: 2; color: appTheme.muted; opacity: 0.6 }
                         }
                         delegate: QuietButton {
                             id: sequenceRow
+                            externalHover: rowMouse.containsMouse
                             required property var modelData
                             objectName: backend ? "sequence-" + modelData.id : "sample-" + modelData
                             width: sequenceList.width - 8
                             theme: appTheme; transparentIdle: preferences.compactSidebar
                             text: backend ? modelData.name : modelData; subtle: true; alignLeft: true
-                            selected: backend ? (selectedSequenceIds.length ? selectedSequenceIds.includes(modelData.id) : backend.selectedId === modelData.id) : sequenceName === modelData
-                            accentText: !!backend && backend.selectedId === modelData.id
+                            selected: backend ? (window.searchOpen ? (filteredPresets[window.searchIndex] || {}).id === modelData.id : selectedSequenceIds.length ? selectedSequenceIds.includes(modelData.id) : backend.selectedId === modelData.id) : sequenceName === modelData
+                            accentText: !window.searchOpen && !!backend && backend.selectedId === modelData.id
                             onClicked: { if (backend) chooseSequence(modelData.id, Qt.NoModifier); else selectSequence(modelData); }
                             MouseArea {
-                                anchors.fill: parent; acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                id: rowMouse; anchors.fill: parent; acceptedButtons: Qt.LeftButton | Qt.RightButton; hoverEnabled: true
                                 onClicked: function(mouse) {
                                     if (!backend) { selectSequence(sequenceRow.modelData); return; }
                                     if (mouse.button === Qt.RightButton) openSequenceMenu(sequenceRow.modelData.id, sequenceRow, mouse.x, mouse.y);
@@ -845,7 +875,7 @@ ApplicationWindow {
         RowLayout {
             visible: preferences.showHints
             Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24; Layout.preferredHeight: 42 * appTheme.scale
-            Caption { text: Catalog.find(appTheme.activeId).name + " · UI preview" }
+            Caption { text: Catalog.find(appTheme.activeId).name + " · beta" }
             Item { Layout.fillWidth: true }
             Caption { text: backend ? (backend.globalHotkeysAvailable ? "Ctrl+B sequences · Global bindings in Hotkeys" : "Ctrl+B sequences") : "F7 start/stop    F8 next    Ctrl+B sequences" }
         }

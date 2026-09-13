@@ -1,0 +1,43 @@
+{
+  "format_version": 1,
+  "name": "Good Basic",
+  "description": "",
+  "effect": "lag",
+  "mode": "target_ping",
+  "policy": "inbound",
+  "loop": true,
+  "traffic": {
+    "protocol": "any",
+    "direction": "inbound",
+    "remote_address": "",
+    "remote_port": 0,
+    "native_backend": "",
+    "native_filter": ""
+  },
+  "steps": [
+    {
+      "name": "Base",
+      "note": "",
+      "type": "lowest"
+    },
+    {
+      "name": "Leap Small",
+      "note": "",
+      "type": "target",
+      "target_ms": 100
+    },
+    {
+      "name": "Leap Medium",
+      "note": "",
+      "type": "target",
+      "target_ms": 200
+    },
+    {
+      "name": "Leap Large",
+      "note": "",
+      "type": "target",
+      "target_ms": 300
+    }
+  ],
+  "server": "Mineplex"
+}

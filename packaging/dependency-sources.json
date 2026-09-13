@@ -1,0 +1,6 @@
+[
+  {"file":"qtbase-everywhere-src-6.10.3.tar.xz","url":"https://download.qt.io/official_releases/qt/6.10/6.10.3/submodules/qtbase-everywhere-src-6.10.3.tar.xz","sha256":"383DC907816338F0CBA72088A524C07458DFC69CE684CA9132FCC4FE91C24B0B"},
+  {"file":"qtdeclarative-everywhere-src-6.10.3.tar.xz","url":"https://download.qt.io/official_releases/qt/6.10/6.10.3/submodules/qtdeclarative-everywhere-src-6.10.3.tar.xz","sha256":"DADF80D43B8E08CA63AA65D46859A42B920A7777CF7E0ECFCB4C4537F9E65C76"},
+  {"file":"qttools-everywhere-src-6.10.3.tar.xz","url":"https://download.qt.io/official_releases/qt/6.10/6.10.3/submodules/qttools-everywhere-src-6.10.3.tar.xz","sha256":"8F00B9E3D1F80973D81CFF67684972B89993183EF19924404D5B8FF0F89675B6"},
+  {"file":"WinDivert-2.2.0-source.zip","url":"https://codeload.github.com/basil00/WinDivert/zip/refs/tags/v2.2.0","sha256":"B23A333F3E67FEAFCF08F99DE82460ABE9282141C03C8225A40111CD4D43579C"}
+]

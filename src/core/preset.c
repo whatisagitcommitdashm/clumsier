@@ -26,6 +26,7 @@ bool presetValidate(const Preset *preset, char *error) {
     size_t i;
     if (!textValid(preset->name, sizeof(preset->name), true) ||
         !textValid(preset->description, sizeof(preset->description), false) ||
+        !textValid(preset->server, sizeof(preset->server), false) ||
         preset->mode < PRESET_ADDED_DELAY || preset->mode > PRESET_TARGET_PING ||
         preset->policy < DELAY_INBOUND || preset->policy > DELAY_BOTH ||
         !preset->step_count || preset->step_count > PRESET_MAX_STEPS) {

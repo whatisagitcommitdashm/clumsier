@@ -1,0 +1,49 @@
+{
+  "format_version": 1,
+  "name": "Pirate Bay",
+  "description": "Brainrot swimmog",
+  "effect": "lag",
+  "mode": "target_ping",
+  "policy": "inbound",
+  "loop": true,
+  "traffic": {
+    "protocol": "any",
+    "direction": "inbound",
+    "remote_address": "",
+    "remote_port": 0,
+    "native_backend": "",
+    "native_filter": ""
+  },
+  "steps": [
+    {
+      "name": "Base",
+      "note": "",
+      "type": "lowest"
+    },
+    {
+      "name": "Leap 1",
+      "note": "",
+      "type": "target",
+      "target_ms": 250
+    },
+    {
+      "name": "Leap 2",
+      "note": "",
+      "type": "target",
+      "target_ms": 150
+    },
+    {
+      "name": "Leap 3",
+      "note": "",
+      "type": "target",
+      "target_ms": 70
+    },
+    {
+      "name": "Leap 4",
+      "note": "",
+      "type": "target",
+      "target_ms": 370
+    }
+  ],
+  "server": "Mineplex"
+}

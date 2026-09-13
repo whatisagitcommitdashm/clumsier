@@ -4,6 +4,7 @@ import QtQuick.Controls
 Button {
     id: control
     required property var theme
+    property bool externalHover: false
     property bool subtle: false
     property bool transparentIdle: false
     property bool selected: false
@@ -14,7 +15,7 @@ Button {
     hoverEnabled: false
     // Track the pointer separately from the button's press/focus state. Rows
     // should stop looking hovered when the pointer leaves, even after a click.
-    readonly property bool pointerInside: pointerHover.hovered && enabled && visible
+    readonly property bool pointerInside: (pointerHover.hovered || externalHover) && enabled && visible
     HoverHandler { id: pointerHover; blocking: false }
     implicitHeight: 38 * theme.scale
     implicitWidth: Math.max(38 * theme.scale, contentItem.implicitWidth + 28 * theme.scale)

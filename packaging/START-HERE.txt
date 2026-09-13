@@ -1,0 +1,30 @@
+Clumsier for Windows (64-bit) - beta
+
+1. Extract the whole ZIP into a folder. Do not run it inside the ZIP.
+2. Open clumsier-beta.exe. Windows requests administrator permission because
+   Clumsier uses WinDivert to delay network traffic. Capture starts only when
+   you press Start.
+3. If Windows reports missing VCRUNTIME/MSVCP DLLs, open app\vc_redist.x64.exe
+   to install Microsoft's runtime, then open Clumsier again.
+4. Enter your usual Mineplex ping with Clumsier stopped. This configures the
+   three included sequences for your connection. Later postpones setup.
+5. Choose a sequence or Quick controls, then Start. Stop restores normal traffic.
+   F5 starts, F6 stops, and F7 toggles by default. Change these in Hotkeys.
+
+Keep the app folder beside the top-level launcher. You do not need Qt, Visual
+Studio, or CMake to run this download. Settings are saved under
+%LOCALAPPDATA%\Clumsier, not in this folder. Updating the extracted application
+does not replace your saved sequences or baselines.
+
+This beta has no built-in feedback delivery. Send feedback to the person who
+sent it to you. Include what happened, what you expected, and reproduction steps.
+
+This is an unsigned beta application, not a completed security audit. The
+WinDivert driver is supplied by its upstream project. If security software
+flags a file, pause and report the exact warning; do not disable protection.
+
+The files in app\ include BUILD-INFO.json, which identifies this build's source.
+SHA256SUMS.txt lists
+the packaged files. Checksums detect changes; they do not establish safety.
+The matching source download contains a double-click Build Clumsier.cmd helper.
+See THIRD-PARTY-NOTICES.txt for dependency licenses and sources.

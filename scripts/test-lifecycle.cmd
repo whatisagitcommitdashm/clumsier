@@ -21,7 +21,7 @@ if /i not "%VSCMD_ARG_TGT_ARCH%"=="x64" (
 echo Building lifecycle tests for x64.
 cd /d "%~dp0.."
 if not exist build\tests mkdir build\tests
-cl /nologo /Zi /Od /MDd /W3 /D_CRT_SECURE_NO_WARNINGS /Iexternal\iup-3.30_Win64_dll16_lib\include /Iexternal\WinDivert-2.2.0-A\include /Isrc /Isrc\core /Isrc\platform\windows /Isrc\backends\windows\legacy /Fobuild\tests\ /Fdbuild\tests\compiler.pdb /Febuild\tests\lifecycle.exe tests\lifecycle.c src\backends\windows\legacy\packet.c /link /DEBUG /MACHINE:X64 /LIBPATH:external\WinDivert-2.2.0-A\x64 WinDivert.lib ws2_32.lib
+cl /nologo /Zi /Od /MDd /W3 /D_CRT_SECURE_NO_WARNINGS /Iexternal\WinDivert-2.2.0-A\include /Isrc /Isrc\core /Isrc\platform\windows /Isrc\backends\windows\legacy /Fobuild\tests\ /Fdbuild\tests\compiler.pdb /Febuild\tests\lifecycle.exe tests\lifecycle.c src\backends\windows\legacy\packet.c /link /DEBUG /MACHINE:X64 /LIBPATH:external\WinDivert-2.2.0-A\x64 WinDivert.lib ws2_32.lib
 if errorlevel 1 exit /b 1
 copy /y external\WinDivert-2.2.0-A\x64\WinDivert.dll build\tests\ >nul
 if errorlevel 1 exit /b 1

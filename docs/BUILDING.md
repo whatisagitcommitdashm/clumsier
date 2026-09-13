@@ -1,47 +1,66 @@
-# Building and checking Clumsier
+# Building Clumsier
 
-The supported local build is a Windows x64 debug build using Visual Studio C++ Build Tools and the bundled IUP/WinDivert libraries.
+The main application is the Qt Quick beta, with live Lag controls, sequences,
+and a HUD. The IUP application and its build routes have been retired. Beta is
+currently a development label; it does not establish release readiness.
 
-From the repository root, run:
+## Windows
+
+For a build without typing commands, extract the source download and
+double-click **Build Clumsier.cmd** in its top-level folder. The helper checks
+for the tools below, offers guidance for missing installations, and lets you
+select a Qt kit folder. Run it again after installing missing tools. A console
+shows build progress, but requires no commands. The result opens in File Explorer;
+the build log is saved to `work/build-from-source.log`. No Git installation is
+needed to build the source ZIP. Allow several GB for the development tools.
+
+Install Visual Studio 2022 C++ Build Tools (including the Windows SDK), CMake,
+and a Qt MSVC 2022 x64 kit with Qt Quick and Quick Controls. The CMake project
+requires Qt 6.8 or newer; the current local kit is Qt 6.10.3.
+
+From the repository root:
 
 ```powershell
-.\scripts\build-windows.cmd
+# Set this if your kit is installed elsewhere:
+$env:CLUMSIER_QT_ROOT = 'C:\Qt\6.10.3\msvc2022_64'
+.\scripts\build-qt-beta.cmd
+.\scripts\test-qt-beta.cmd
 ```
 
-The script locates Visual Studio through `vswhere`, selects its x64 tools, compiles the application and resources, and copies the required DLLs, driver, and default filter configuration. Output is `bin/baseline-msvc/clumsy.exe`; the directory name is retained for existing local debugging setups. Close an already running copy before rebuilding that executable. The old local `work/build-baseline.cmd` has also been updated for the new layout.
+Without that override, the script uses `bin/Qt/6.10.3/msvc2022_64`.
+The script selects the x64 compiler, builds with CMake, and deploys to
+`bin/qt-beta/clumsier-beta.exe`. Close that executable before rebuilding it.
+Launching requests administrator permission; capture begins only after Start.
+Your existing Qt preferences, hotkeys, and sequence library remain in place.
+Old binaries in ignored output folders are not removed by this source cleanup.
 
-The application requests elevation when launched because WinDivert needs administrator access. Building and running the automated tests do not require elevation.
+For interface behavior and packaging instructions, see [Qt beta](QT-BETA.md).
+See [Releasing](RELEASING.md) for clean packaging, source downloads, dependency
+notices, and the final manual checks. Test executables are not shipped in the
+runnable ZIP; their source remains in the source ZIP.
 
-## Automated checks
+## Checks
 
 ```powershell
 .\scripts\test-core.cmd
 .\scripts\test-lifecycle.cmd
 .\scripts\test-hotkeys.cmd
 .\scripts\test-presets.cmd
+.\scripts\test-qt-beta.cmd
 ```
 
-- `test-core` compiles the shared core without Windows or IUP headers, tests the controller with a fake backend, and tests the Windows filter translator and Lag queue without intercepting network traffic.
-- `test-lifecycle` exercises the existing capture workers with a simulated WinDivert driver.
-- `test-hotkeys` checks matching, recording, persistence, forwarding, and actual listener startup/shutdown. It does not inject keyboard input or start packet capture.
-- `test-presets` checks target calculations, sequence transitions, JSON validation, Windows library persistence, and real IUP editor callbacks without opening windows or capturing traffic. Test files live in temporary folders, not your library.
+These cover shared logic, simulated packet lifecycle, Windows hotkeys, preset
+parsing/storage, and Qt behavior. The Qt tests require the Qt build first.
+The retired IUP callback tests have been removed. These automated Windows checks
+do not establish real game timing; manually check delay changes, sequence
+switching, hotkeys, HUD behavior, and Stop restoring normal traffic.
 
-The core tests can also be compiled with a standard C11 compiler, independently of the Windows application:
+## Other platforms
 
-```text
-cc -std=c11 -Wall -Wextra -Werror -pedantic -Isrc tests/core.c src/core/actions.c src/core/controller.c src/core/network.c src/core/hotkey_matcher.c src/core/preset.c src/core/preset_json.c external/cjson/cJSON.c -DCJSON_NESTING_LIMIT=32 -o core-tests
-```
+[Qt on Linux](QT-LINUX.md) describes the same frontend with the Linux helper,
+including build prerequisites and isolated network tests. [Linux](LINUX.md)
+also documents the terminal diagnostic frontend.
 
-The core has been checked with MSVC and the locally installed MinGW GCC. This is not a Linux or macOS backend test. Separate [Linux](LINUX.md) and [macOS](MACOS.md) prototypes have their own application builds and checks; neither changes the Windows application. See [platform development](PLATFORM-DEVELOPMENT.md) for their scope and validation requirements.
-
-The portable terminal frontend is tested with `sh scripts/test-prototype.sh` on a Unix system with a C11 compiler. These tests use a fake backend but the real preset parser and controller, and cover command input, sequence navigation, failed changes, and cleanup. Real Linux packet capture is tested separately as described in the Linux guide.
-
-## Other build definitions
-
-`genie.lua` and `build.zig` have updated source paths and include directories. The legacy Zig configuration still needs its compatible toolchain established; these routes have not been verified by this refactor. `external/` contains the bundled dependencies, and `etc/` contains the resources and initial filter configuration.
-
-## Manual regression checks
-
-After a successful build, check Start/Stop/Toggle, recording and saved hotkeys, Lag enable/disable, direction selection, and editing delay while capture runs. Confirm Stop restores normal traffic, including after a high-delay setting. Check another inherited effect as well. Automated tests do not establish actual in-game timing or GUI correctness.
-
-For the new preset workflow, use the focused [manual and design checks](PRESETS.md#manual-acceptance-checks). The build also copies cJSON's license beside the executable.
+[macOS](MACOS.md) describes the separate native prototype and its unverified
+native build and packet-testing requirements. It is not yet the integrated Qt
+application available on Windows and Linux.

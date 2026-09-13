@@ -1,15 +1,26 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 
 ComboBox {
     id: control
     required property var theme
+    TextMetrics { id: selectedMetrics; text: control.displayText; font: control.font }
+    implicitWidth: Math.ceil(selectedMetrics.advanceWidth) + 48 * theme.scale
+    Layout.fillWidth: true
+    Layout.minimumWidth: 0
+    Layout.preferredWidth: implicitWidth
+    Layout.maximumWidth: implicitWidth
     implicitHeight: 38 * theme.scale
+    padding: 0 // The text item supplies padding; counting both would clip the selected label.
+    leftPadding: 0
+    rightPadding: 0
     font.family: theme.family
+    font.pixelSize: 14 * theme.scale
     contentItem: Text {
         text: control.displayText; color: control.theme.text; font: control.font
         verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight
-        leftPadding: 12; rightPadding: 30
+        leftPadding: 12 * control.theme.scale; rightPadding: 30 * control.theme.scale
     }
     indicator: Text {
         text: "⌄"; color: control.theme.muted

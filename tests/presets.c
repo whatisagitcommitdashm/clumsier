@@ -80,6 +80,7 @@ static void testJson(void) {
     size_t length, i;
     strcpy(preset.description, "Quotes \" and slashes \\ and newlines\n are preserved.");
     strcpy(preset.steps[1].note, "No delay, regardless of who imports this.");
+    strcpy(preset.server, "Mineplex");
     json = presetSerialize(&preset, error); assert(json); length = strlen(json);
     assert(!strstr(json, "baseline"));
     assert(presetParse(json, length, &loaded, error)); assert(!memcmp(&preset, &loaded, sizeof(preset)));
@@ -93,6 +94,8 @@ static void testJson(void) {
     replaceAndReject(json, "\"target_ms\":\t200", "\"target_ms\": 200, \"target_ms\": 100");
     replaceAndReject(json, "\"target_ms\":\t200", "\"target_ms\": 200, \"inbound_ms\": 50");
     replaceAndReject(json, "Four leaps", "Bad\\u0000name");
+    replaceAndReject(json, "\"server\":\t\"Mineplex\"", "\"server\": 40");
+    replaceAndReject(json, "\"server\":\t\"Mineplex\"", "\"server\": \"Mineplex\", \"server\": \"Other\"");
     replaceAndReject(json, "\"effect\":\t\"lag\"", "\"effect\": \"drop\"");
     replaceAndReject(json, "\"policy\":\t\"inbound\"", "\"policy\": \"sideways\"");
     replaceAndReject(json, "\"loop\":\tfalse", "\"loop\": false, \"unknown\": 1");
