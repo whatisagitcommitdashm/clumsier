@@ -1,7 +1,4 @@
-"""Bounded, explicitly authorized development-helper background startup.
-
-Not an installer/service manager: invoked only by the sudo-authorized helper.
-"""
+"""Bounded background startup for the explicitly administrator-authorized helper."""
 import os
 import select
 import signal

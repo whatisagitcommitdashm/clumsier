@@ -13,6 +13,7 @@ public:
     ~DummynetBackend() override;
     NetworkBackend interface();
     void shutdown();
+    bool probe(char *error) { return request({{"command", "status"}}, error); }
 signals:
     void busyChanged(bool busy);
     void failed(const QString &error);

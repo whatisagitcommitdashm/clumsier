@@ -662,6 +662,9 @@ int main(int argc, char **argv) {
             QSettings localBindings(library.filePath("ui.ini"), QSettings::IniFormat);
             check(localBindings.value("shell/searchShortcut").toString() == "Ctrl+Shift+F" && localBindings.value("shell/newSequenceShortcut").toString() == "Ctrl+Shift+T", "Recorded window shortcuts persist");
             window->setProperty("page", "sequences"); QTest::qWait(100);
+            quickWindow->requestActivate();
+            check(QTest::qWaitForWindowActive(quickWindow), "Bridge window active before recorded shortcuts");
+            quickWindow->contentItem()->forceActiveFocus();
             QTest::keyClick(quickWindow, Qt::Key_F, Qt::ControlModifier | Qt::ShiftModifier); QTest::qWait(100);
             check(searchField && searchField->isVisible() && searchField->hasActiveFocus(), "Recorded search shortcut opens search");
             QTest::keyClick(quickWindow, Qt::Key_Escape); QTest::qWait(100);

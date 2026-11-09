@@ -16,6 +16,7 @@
 #ifdef Q_OS_MAC
 #include "platform/macos/qt_backend.h"
 #include "platform/macos/dummynet_backend.h"
+#include "platform/macos/helper_setup.h"
 #endif
 #include <QDir>
 #include <QLockFile>
@@ -49,6 +50,7 @@ int main(int argc, char *argv[])
 #ifdef Q_OS_MAC
     MacQtBackend extensionNetwork;
     DummynetBackend localNetwork;
+    MacHelperSetup helperSetup(&localNetwork);
     const bool useExtension = app.arguments().contains("--network-extension");
     const NetworkBackend macInterface = useExtension ? extensionNetwork.interface() : localNetwork.interface();
 #endif
@@ -74,6 +76,11 @@ int main(int argc, char *argv[])
 #endif
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed,
                      &app, [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
+#ifdef Q_OS_MAC
+    if (!checkLoad && !useExtension) engine.setInitialProperties({
+        {"backend", QVariant::fromValue(bridge.get())}, {"page", "quick controls"},
+        {"localHelper", QVariant::fromValue(&helperSetup)}});
+#endif
     engine.loadFromModule("Clumsier.Beta", "Main");
     if (engine.rootObjects().isEmpty()) return 1;
     WindowChrome chrome(qobject_cast<QQuickWindow *>(engine.rootObjects().first()));

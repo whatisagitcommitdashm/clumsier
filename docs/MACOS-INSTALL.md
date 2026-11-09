@@ -1,0 +1,105 @@
+# Clumsier macOS local beta
+
+## Before installing
+
+This experimental PF/dummynet build affects **all TCP traffic**, not just
+Minecraft. UDP is not delayed. Stop and quit restore normal traffic on a
+best-effort basis; a helper crash/power loss may need the scoped recovery
+commands in its log. Never flush the entire firewall or all pipes.
+
+This beta package is **not notarized** and is not yet clean-machine validated.
+An Apple Development signature is not a Developer ID public release signature.
+Do not disable SIP or Gatekeeper, or run blanket quarantine-removal commands.
+The downloaded artifact must pass a separate Gatekeeper acceptance check before
+it is described as a smooth public installer. Do not publish it as stable.
+
+Use only an artifact from the maintainer/fork release you trust. Verify its
+published SHA-256 checksum. The package's embedded package-audit.json states
+the actual minimum macOS version. This build is native-architecture only.
+
+## Install and play
+
+1. Quit any running Clumsier, then wait 70 seconds for helper cleanup.
+2. Open the .pkg and follow Installer. It places Clumsier and Uninstall Clumsier
+   in Applications, and its private runtime in /Library/Application Support/Clumsier.
+   No Python, Qt, Homebrew or repository checkout is needed by the installed app.
+3. Open Clumsier from Applications. In setup choose **Authorize networking**.
+   A macOS administrator prompt starts only the scoped networking helper; the
+   GUI never runs as root. Authorization does not enable delay or create a
+   login item/service. You may need approval again next session.
+4. Optional: on Hotkeys enable Input Monitoring in System Settings and return.
+   Record a keyboard key to verify keyboard access, not just mouse capture.
+   macOS may require quitting/reopening. Leave this off to use playback buttons.
+5. Choose a small delay and direction, then Start. No server selection needed.
+   Start with a practice run; other TCP applications can slow down too.
+
+Use **Set up networking** again if the helper expires. Stop removes conditioning;
+quit/disconnect clears it, then the helper exits after 60 seconds without a GUI.
+A connected unresponsive GUI expires after 10 seconds without a heartbeat.
+Global keys deliberately pass through; Cmd+Q while Minecraft is focused can quit
+the game. Close the focused Clumsier window to test Clumsier shutdown safely.
+
+## Update and uninstall
+
+Quit Clumsier and wait 70 seconds before running a newer package. Updates retain
+presets; keep the same publisher signature. Changed signing identity can require
+fresh Input Monitoring approval. Open **Uninstall Clumsier** in Applications for
+administrator-authorized removal. It refuses removal while the helper is active
+or unresolved sockets remain. It preserves presets, privacy choices and recovery
+logs. It never flushes network rules. Remove the Uninstall Clumsier app afterward.
+
+Logs: /var/run/clumsier-lag-USER_ID.log (administrator read access). If cleanup
+fails, obtain help using that session's exact anchor/pipe/reference commands.
+Do not delete a live socket to force a second helper.
+
+## Release acceptance still required
+
+Test the actual downloaded .pkg on a clean Mac: Gatekeeper, install/update,
+root ownership, authorization cancel/retry, start/stop, close/reopen, forced GUI
+exit, uninstall, keyboard permission grant/deny/revoke, game-focused hotkeys,
+HUD, all-TCP side effects, IPv6/VPN/sleep if supported. Do not count build-tree
+success as clean-machine installation evidence.
+
+## Build the beta (maintainers only)
+
+Use a dedicated Python 3.12 environment with PyInstaller 6.22.3 and the Qt SDK
+used by the application. PyInstaller is a build dependency, not a player install
+requirement. Review all bundled library licenses/source obligations before a
+public release. The package pipeline audits runtime dependencies and computes
+the actual minimum macOS version rather than advertising macOS 13 unconditionally.
+
+```sh
+SIGN_IDENTITY='YOUR_CERTIFICATE_FINGERPRINT_OR_NAME' \
+PYINSTALLER_PYTHON='/absolute/path/to/build-venv/bin/python' \
+CLUMSIER_QT_ROOT='/opt/homebrew' \
+sh scripts/package-macos-local.sh
+```
+
+The output is in dist/ with a SHA-256 file. Building does not install the package,
+start the helper, request administrator permission, or publish a GitHub release.
+The current package is unsigned at the Installer-container level; the application
+and helper binaries use the selected identity. Before general public release,
+use appropriate Developer ID signing/notarization and test the downloaded file.
+Do not distribute signing keys or use them in source control.
+
+## Current local validation
+
+The first Apple Silicon artifact is about 48 MiB and reports macOS 15.7.0 as
+its minimum. Its staged application passes strict nested-signature verification
+and `--check-load` with a minimal environment; the frozen helper runs `--help`
+without the build Python. The dependency audit inspected 167 Mach-O files and
+rejected external absolute dependencies and escaping symlinks. This does not
+prove operation on a machine without the development tools installed.
+
+31 Python tests and the six macOS-specific Qt tests pass, including a simulated
+first-run setup dialog (no authorization prompt or networking changes). The full
+Qt suite is not green: `qt-shell` and `qt-bridge` fail keyboard/window-activation
+checks in this session. They remain release blockers pending interactive rerun
+and investigation, not tests to disable. No privileged installation, update,
+uninstall or actual authorization dialog has been exercised by these checks.
+
+This artifact is for local acceptance testing, not a published player release.
+Before publishing, complete the above manual matrix, downloaded-file security
+checks, and artifact-specific third-party license/source review. The bundled
+notices collector currently targets the tested Qt 6.11.2/Python 3.12.8 build;
+update it when changing SDK/runtime versions.

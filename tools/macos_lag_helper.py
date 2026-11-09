@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Root-only local broker. Launch explicitly in Terminal; never run Qt as root."""
+"""Root-only local broker. Launch through explicit authorization; never run Qt as root."""
 import argparse
 import contextlib
 import errno
 import ipaddress
 import json
 import os
+import pwd
 import signal
 import socket
 import stat
@@ -85,11 +86,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--server', type=ipaddress.ip_address, help='Optional restriction to one numeric remote IP')
     parser.add_argument('--port', type=int, default=0, help='Optional remote port restriction; 0 means any')
+    parser.add_argument('--uid', type=int, help='Target local user for installed, explicitly authorized helper')
     parser.add_argument('--background', action='store_true', help='Detach after socket is ready; logs go to /var/run')
     args = parser.parse_args()
     integer(args.port, 0, 65535)
     address = str(args.server) if args.server else ""
-    uid = int(os.environ.get('SUDO_UID', '0'))
+    uid = args.uid if args.uid is not None else int(os.environ.get('SUDO_UID', '0'))
+    try:
+        user = pwd.getpwuid(uid)
+        if uid <= 0 or not user.pw_dir.startswith('/Users/'):
+            raise KeyError(uid)
+    except KeyError:
+        parser.error('A non-root local user is required')
     if sys.platform != 'darwin' or os.geteuid() != 0 or uid <= 0:
         parser.error('Launch with sudo from your normal user account')
     if args.background:

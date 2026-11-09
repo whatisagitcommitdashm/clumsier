@@ -42,6 +42,7 @@ if(APPLE)
     enable_language(OBJCXX)
     find_package(Qt6 6.8 REQUIRED COMPONENTS Network)
     add_library(clumsier-macos-qt STATIC
+        ../../platform/macos/helper_setup.cpp
         ../../platform/macos/qt_backend.cpp ../../platform/macos/mac_control.mm
         ../../platform/macos/dummynet_backend.cpp ../../platform/macos/hud_window.mm
         ../../platform/macos/hotkeys.cpp ../../platform/macos/hotkey_listener.mm
@@ -147,6 +148,10 @@ if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME qt-linux-store COMMAND qt-store-test)
 endif()
 if(BUILD_TESTING AND APPLE)
+    qt_add_executable(qt-mac-setup-test ../../../tests/macos/qt_helper_setup.cpp)
+    target_link_libraries(qt-mac-setup-test PRIVATE clumsier-macos-qt Qt6::QuickControls2 Qt6::Test)
+    target_compile_definitions(qt-mac-setup-test PRIVATE BETA_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME qt-mac-setup COMMAND qt-mac-setup-test)
     qt_add_executable(qt-mac-hud-test ../../../tests/macos/hud_window.mm)
     target_compile_options(qt-mac-hud-test PRIVATE -fobjc-arc)
     target_link_libraries(qt-mac-hud-test PRIVATE clumsier-macos-qt)

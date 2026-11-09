@@ -36,7 +36,7 @@ bool DummynetBackend::request(QJsonObject object, char *error) {
         pending_.clear();
         socket_.connectToServer(socketPath_);
         if (!socket_.waitForConnected(1000))
-            detail = "Start the helper with scripts/start-macos-local.sh SERVER_IP [PORT], then retry Start. See docs/MACOS-LOCAL-LAG.md.";
+            detail = "Authorize networking using Set up networking, then retry Start. Development checkout: scripts/start-macos-local.sh (no server required).";
     }
     if (detail.isEmpty()) {
         QEventLoop loop;

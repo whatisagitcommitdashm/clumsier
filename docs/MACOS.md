@@ -316,3 +316,10 @@ Recommended first artifact: a self-contained beta app bundle with a first-run
 server/authorization/optional-hotkeys wizard. A DMG is only its transport; it
 cannot solve privilege separation, missing runtimes or permission identity.
 Keep beta limitations explicit until the above checks pass.
+
+### Self-contained PF/dummynet beta package
+
+See [macOS installation](MACOS-INSTALL.md) for the local beta packaging pipeline,
+GUI administrator authorization, first-run guidance, update/uninstall behavior,
+and clean-machine/distribution acceptance gates. This is independent of the
+Network Extension packaging script and needs no Network Extension profiles.
