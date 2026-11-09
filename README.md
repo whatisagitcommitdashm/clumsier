@@ -40,6 +40,10 @@ GUI demo with live ping measurements. Linux global hotkeys remain pending.
 
 ## macOS development
 
+For local gameplay testing without Apple membership, see the
+[PF/dummynet setup](docs/MACOS-LOCAL-LAG.md). The macOS GUI defaults to this
+Terminal-authorized helper; the signed provider is opt-in with `--network-extension`.
+
 The Qt application has an experimental macOS Network Extension backend and
 passive global hotkeys. See [macOS support](docs/MACOS.md) for unsigned local
 builds, signed extension packaging, Input Monitoring setup, current limitations,

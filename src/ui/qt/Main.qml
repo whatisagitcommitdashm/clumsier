@@ -658,6 +658,11 @@ ApplicationWindow {
                                 objectName: "advancedModeSetting"; theme: appTheme; text: "Advanced mode"; helpText: "Expose protocol, direction, address, port, and Windows filter controls for sequences."; checked: preferences.advancedMode
                                 onToggled: { preferences.advancedMode = checked; preferences.setValue("advancedMode", checked); preferences.sync(); }
                             }
+                            Caption {
+                                visible: preferences.advancedMode && Qt.platform.os === "osx"
+                                Layout.fillWidth: true
+                                text: "Local PF/dummynet mode uses the helper's authorized TCP server only (0–1000 ms per direction). Retained-packet retiming and lossless Stop may differ from the Network Extension scheduler. Check the helper Terminal if disconnected."
+                            }
                             QuietCheckBox {
                                 objectName: "autoSaveSetting"; visible: !!backend; theme: appTheme; text: "Autosave sequences"
                                 helpText: "Save valid edits after a brief pause in typing. Invalid entries stay editable without replacing the saved sequence."

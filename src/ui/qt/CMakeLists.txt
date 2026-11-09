@@ -40,13 +40,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 if(APPLE)
     enable_language(OBJCXX)
+    find_package(Qt6 6.8 REQUIRED COMPONENTS Network)
     add_library(clumsier-macos-qt STATIC
         ../../platform/macos/qt_backend.cpp ../../platform/macos/mac_control.mm
+        ../../platform/macos/dummynet_backend.cpp ../../platform/macos/hud_window.mm
         ../../platform/macos/hotkeys.cpp ../../platform/macos/hotkey_listener.mm
         ../../platform/linux/preset_store.cpp)
     target_compile_options(clumsier-macos-qt PRIVATE -fobjc-arc -fblocks)
-    target_link_libraries(clumsier-macos-qt PUBLIC clumsier-core Qt6::Core
-        "-framework Foundation" "-framework CoreGraphics"
+    target_link_libraries(clumsier-macos-qt PUBLIC clumsier-core Qt6::Core Qt6::Network Qt6::Quick
+        "-framework Foundation" "-framework CoreGraphics" "-framework AppKit"
         "-framework NetworkExtension" "-framework SystemExtensions")
 endif()
 if(WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
@@ -137,6 +139,14 @@ if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME qt-linux-store COMMAND qt-store-test)
 endif()
 if(BUILD_TESTING AND APPLE)
+    qt_add_executable(qt-mac-hud-test ../../../tests/macos/hud_window.mm)
+    target_compile_options(qt-mac-hud-test PRIVATE -fobjc-arc)
+    target_link_libraries(qt-mac-hud-test PRIVATE clumsier-macos-qt)
+    add_test(NAME qt-mac-hud COMMAND qt-mac-hud-test)
+    qt_add_executable(qt-mac-dummynet-test ../../../tests/macos/qt_dummynet.cpp)
+    target_include_directories(qt-mac-dummynet-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../..)
+    target_link_libraries(qt-mac-dummynet-test PRIVATE clumsier-macos-qt Qt6::Network)
+    add_test(NAME qt-mac-dummynet COMMAND qt-mac-dummynet-test)
     qt_add_executable(qt-mac-hotkeys-test ../../../tests/macos/hotkeys.cpp)
     target_include_directories(qt-mac-hotkeys-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../..)
     target_link_libraries(qt-mac-hotkeys-test PRIVATE clumsier-macos-qt Qt6::Core)

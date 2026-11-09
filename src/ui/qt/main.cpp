@@ -15,6 +15,7 @@
 #endif
 #ifdef Q_OS_MAC
 #include "platform/macos/qt_backend.h"
+#include "platform/macos/dummynet_backend.h"
 #endif
 #include <QDir>
 #include <QLockFile>
@@ -46,13 +47,20 @@ int main(int argc, char *argv[])
     LinuxQtBackend network(app.arguments().contains("--direct-helper"));
 #endif
 #ifdef Q_OS_MAC
-    MacQtBackend network;
+    MacQtBackend extensionNetwork;
+    DummynetBackend localNetwork;
+    const bool useExtension = app.arguments().contains("--network-extension");
+    const NetworkBackend macInterface = useExtension ? extensionNetwork.interface() : localNetwork.interface();
 #endif
     std::unique_ptr<AppBridge> bridge;
 #if defined(Q_OS_WIN)
     if (!checkLoad) bridge = std::make_unique<AppBridge>(windowsNetworkBackend());
 #else
+#ifdef Q_OS_MAC
+    if (!checkLoad) bridge = std::make_unique<AppBridge>(macInterface);
+#else
     if (!checkLoad) bridge = std::make_unique<AppBridge>(network.interface());
+#endif
 #endif
 #endif
 
@@ -77,15 +85,22 @@ int main(int argc, char *argv[])
     if (bridge) {
         // Linux and macOS adapters expose the same signal surface; derive the
         // type from the instance so this block compiles on both.
-        using BackendType = std::remove_reference_t<decltype(network)>;
-        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
-        QObject::connect(&network, &BackendType::busyChanged, window, [window, hud](bool busy) {
-            window->contentItem()->setEnabled(!busy);
-            if (hud) hud->contentItem()->setEnabled(!busy);
-            window->setTitle(busy ? "Clumsier — waiting for networking" : "Clumsier");
-        });
-        QObject::connect(&network, &BackendType::failed, bridge.get(), &AppBridge::reportBackendError, Qt::QueuedConnection);
-        QObject::connect(&app, &QCoreApplication::aboutToQuit, &network, &BackendType::shutdown);
+        auto connectBackend = [&](auto &network) {
+            using BackendType = std::remove_reference_t<decltype(network)>;
+            auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+            QObject::connect(&network, &BackendType::busyChanged, window, [window, hud](bool busy) {
+                window->contentItem()->setEnabled(!busy);
+                if (hud) hud->contentItem()->setEnabled(!busy);
+                window->setTitle(busy ? "Clumsier — waiting for networking" : "Clumsier");
+            });
+            QObject::connect(&network, &BackendType::failed, bridge.get(), &AppBridge::reportBackendError, Qt::QueuedConnection);
+            QObject::connect(&app, &QCoreApplication::aboutToQuit, &network, &BackendType::shutdown);
+        };
+#ifdef Q_OS_MAC
+        if (useExtension) connectBackend(extensionNetwork); else connectBackend(localNetwork);
+#else
+        connectBackend(network);
+#endif
     }
 #endif
     // Deployment check: exercise the embedded QML and shipped plugins without

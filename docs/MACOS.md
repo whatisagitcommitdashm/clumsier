@@ -1,6 +1,10 @@
 # macOS support
 
-The Qt application uses a Network Extension packet filter for system-wide lag.
+For local use without Apple membership, the Qt app now defaults to a scoped
+PF/dummynet helper. See [local setup](MACOS-LOCAL-LAG.md) for the Terminal command,
+authorization model, and limits. Start the helper before using Start in the GUI.
+
+The optional `--network-extension` backend uses a Network Extension packet filter for system-wide lag.
 It shares the preset library, quick controls, sequences and HUD with the other
 platforms. The macOS adapter activates and registers the provider, sends
 acknowledged settings over NSXPC and keeps a running session alive with
