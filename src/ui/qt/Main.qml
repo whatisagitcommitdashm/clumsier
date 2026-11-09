@@ -661,7 +661,7 @@ ApplicationWindow {
                             Caption {
                                 visible: preferences.advancedMode && Qt.platform.os === "osx"
                                 Layout.fillWidth: true
-                                text: "Local PF/dummynet mode uses the helper's authorized TCP server only (0–1000 ms per direction). Retained-packet retiming and lossless Stop may differ from the Network Extension scheduler. Check the helper Terminal if disconnected."
+                                text: "Local PF/dummynet mode affects all TCP traffic by default, not just Minecraft; advanced target filters can narrow it (0–1000 ms per direction). Retained-packet retiming and lossless Stop may differ from the Network Extension scheduler. Check the helper Terminal if disconnected."
                             }
                             QuietCheckBox {
                                 objectName: "autoSaveSetting"; visible: !!backend; theme: appTheme; text: "Autosave sequences"
@@ -874,8 +874,26 @@ ApplicationWindow {
                 }
             }
         }
+        QuietButton {
+            id: hotkeyPermissionSettingsButton
+            objectName: "hotkeyPermissionSettingsButton"
+            visible: backend && backend.globalHotkeySetupHint.length > 0
+                && backend.error.indexOf("Input Monitoring") >= 0
+            Layout.leftMargin: 24
+            theme: appTheme
+            text: "Open Input Monitoring Settings"
+            onClicked: backend.openHotkeySettings()
+        }
+        QuietButton {
+            objectName: "retryHotkeyPermissionButton"
+            visible: hotkeyPermissionSettingsButton.visible
+            Layout.leftMargin: 24
+            theme: appTheme
+            text: "Retry and enable hotkeys"
+            onClicked: backend.retryHotkeys()
+        }
         Caption { text: backend ? backend.error : ""; visible: backend && backend.error !== ""; Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24; Layout.bottomMargin: 16; color: appTheme.accent }
-        Caption { text: notice; visible: notice !== ""; Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24; Layout.bottomMargin: 12; color: appTheme.accent }
+        Caption { text: notice; visible: notice !== "" && (!backend || notice !== backend.error); Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24; Layout.bottomMargin: 12; color: appTheme.accent }
         Rule { visible: preferences.showHints }
         RowLayout {
             visible: preferences.showHints

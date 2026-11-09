@@ -117,6 +117,22 @@ int main(int argc, char **argv) {
     dispatcher.input(macHotkeyPhysicalKey(12), true);
     ok &= check(actionCount == 2, "Right modifier remains held after left modifier release");
 
+    // Recording begins after a button click: its trailing mouse-up must
+    // not become the binding, and punctuation must survive native mapping.
+    for (unsigned code : {27u, 24u}) {
+        HotkeyBinding result{};
+        bool finished = false;
+        dispatcher.record([&](const HotkeyBinding &value, bool done) {
+            result = value; finished = done;
+        });
+        dispatcher.input(macHotkeyFromMouseButton(0), false);
+        const auto key = macHotkeyPhysicalKey(code);
+        dispatcher.input(key, true);
+        dispatcher.input(key, false);
+        ok &= check(finished && result.keys[macHotkeyFromKeyCode(code)]
+            && !result.keys[macHotkeyFromMouseButton(0)],
+            "Minus/Equals recording ignores the Record button's trailing mouse release");
+    }
     HotkeyBinding recorded{}; bool recordingFinished = false;
     dispatcher.record([&](const HotkeyBinding &value, bool finished) {
         recorded = value; recordingFinished = finished;

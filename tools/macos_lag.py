@@ -23,12 +23,21 @@ def run(*args, text=None):
 
 
 def rules(address, port, direction, pipes):
-    family = 'inet6' if ipaddress.ip_address(address).version == 6 else 'inet'
+    address = str(ipaddress.ip_address(address)) if address else ''
+    if type(port) is not int or not 0 <= port <= 65535:
+        raise ValueError('Invalid remote port')
+    if direction not in ('in', 'out', 'both'):
+        raise ValueError('Invalid direction')
+    families = [('inet6' if ipaddress.ip_address(address).version == 6 else 'inet')] if address else ['inet', 'inet6']
+    remote = address or 'any'
+    if port:
+        remote += f' port {port}'
     lines = []
-    if direction in ('in', 'both'):
-        lines.append(f'dummynet in quick {family} proto tcp from {address} port {port} to any pipe {pipes[0]}')
-    if direction in ('out', 'both'):
-        lines.append(f'dummynet out quick {family} proto tcp from any to {address} port {port} pipe {pipes[1]}')
+    for family in families:
+        if direction in ('in', 'both'):
+            lines.append(f'dummynet in quick {family} proto tcp from {remote} to any pipe {pipes[0]}')
+        if direction in ('out', 'both'):
+            lines.append(f'dummynet out quick {family} proto tcp from any to {remote} pipe {pipes[1]}')
     return '\n'.join(lines) + '\n'
 
 

@@ -111,8 +111,16 @@ struct MacHotkeyListener::Impl : std::enable_shared_from_this<Impl> {
     }
 
     void run() {
-        CFMachPortRef localTap = CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap,
-            kCGEventTapOptionListenOnly, eventMask(), callback, this);
+        // A keyboard-only probe fails if macOS strips keyboard events from
+        // the requested mask; a mixed mouse/keyboard tap can still succeed.
+        const CGEventMask keyboardMask = CGEventMaskBit(kCGEventKeyDown)
+            | CGEventMaskBit(kCGEventKeyUp) | CGEventMaskBit(kCGEventFlagsChanged);
+        CFMachPortRef keyboardProbe = CGEventTapCreate(kCGSessionEventTap,
+            kCGHeadInsertEventTap, kCGEventTapOptionListenOnly, keyboardMask, callback, this);
+        const bool keyboardAllowed = keyboardProbe != nullptr;
+        if (keyboardProbe) { CFMachPortInvalidate(keyboardProbe); CFRelease(keyboardProbe); }
+        CFMachPortRef localTap = keyboardAllowed ? CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap,
+            kCGEventTapOptionListenOnly, eventMask(), callback, this) : nullptr;
         CFRunLoopSourceRef localSource = localTap
             ? CFMachPortCreateRunLoopSource(kCFAllocatorDefault, localTap, 0) : nullptr;
         CFRunLoopRef localRunLoop = CFRunLoopGetCurrent();
@@ -159,11 +167,19 @@ MacHotkeyListener::~MacHotkeyListener() { close(); }
 
 bool MacHotkeyListener::open(ActionCallback callback, bool requestPermission, char *error) {
     if (isOpen()) { impl_->dispatcher.setActionCallback(std::move(callback)); return true; }
-    if (!CGPreflightListenEventAccess()
-        && (!requestPermission || !CGRequestListenEventAccess())) {
-        setListenerError(error, "Global hotkeys need Input Monitoring permission. Enable Clumsier in System Settings > Privacy & Security > Input Monitoring, then turn hotkeys on again.");
+    // A non-null event tap is not proof of keyboard permission: macOS
+    // may still deliver mouse events while excluding keyboard events.
+    // Never advertise a mouse-only listener as healthy global hotkeys.
+    bool preflightGranted = CGPreflightListenEventAccess();
+    if (!preflightGranted && requestPermission) {
+        CGRequestListenEventAccess();
+        preflightGranted = CGPreflightListenEventAccess();
+    }
+    if (!preflightGranted) {
+        setListenerError(error, "Input Monitoring is not granted to this running Clumsier build. Mouse events alone do not mean keyboard access works. Quit Clumsier, remove and re-add the current app in Input Monitoring, then reopen. A rebuilt development app may require fresh approval.");
         return false;
     }
+    if (impl_->thread.joinable()) impl_->thread.join();
     impl_->dispatcher.setActionCallback(std::move(callback));
     {
         std::lock_guard lock(impl_->mutex);
@@ -176,7 +192,9 @@ bool MacHotkeyListener::open(ActionCallback callback, bool requestPermission, ch
     }
     if (!isOpen()) {
         if (impl_->thread.joinable()) impl_->thread.join();
-        setListenerError(error, "Could not create the macOS global input listener. Check Input Monitoring permission and try again.");
+        setListenerError(error, preflightGranted
+            ? "Input Monitoring preflight succeeded, but macOS could not create the input listener. Quit and reopen Clumsier; if this persists, report this error."
+            : "macOS rejected this build's input listener and Input Monitoring preflight is denied. If Settings already shows Clumsier enabled, quit the app and remove/re-add the current Clumsier.app entry, then reopen. Rebuilt development apps may have a different signing identity.");
         return false;
     }
     return true;

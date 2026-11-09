@@ -77,6 +77,8 @@ public:
     Q_INVOKABLE void cancelRecording();
     Q_INVOKABLE bool saveBinding(int action, const QString &text);
     Q_INVOKABLE void clearError();
+    Q_INVOKABLE bool openHotkeySettings();
+    Q_INVOKABLE bool retryHotkeys();
     Q_INVOKABLE QString shortcutForKey(int key, int modifiers) const;
 signals:
     void preferencesChanged();

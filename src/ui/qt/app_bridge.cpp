@@ -5,6 +5,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QFileInfo>
+#include <QDesktopServices>
 #include <QSettings>
 #include <QTimer>
 #include <QDir>
@@ -241,6 +242,47 @@ QString AppBridge::recording() const { return d->recording; }
 bool AppBridge::globalHotkeysAvailable() const {
 #if defined(Q_OS_WIN) || defined(Q_OS_MAC)
     return true;
+#else
+    return false;
+#endif
+}
+bool AppBridge::retryHotkeys() {
+#ifdef Q_OS_MAC
+    if (!d->nativeHotkeysAllowed)
+        return fail("Global hotkeys are unavailable in this session.");
+    // Explicit retry must re-create the tap, not trust a stale open flag.
+    cancelRecording();
+    if (d->macHotkeys) d->macHotkeys->close();
+    d->listening = false;
+    d->inputSuspended = false;
+    if (!startMacHotkeys(true)) {
+        d->hotkeysEnabled = false;
+        updateHotkeyPause();
+        emit preferencesChanged();
+        return false;
+    }
+    if (!savePreference("hotkeysEnabled", true)) {
+        d->macHotkeys->close();
+        d->listening = false;
+        d->hotkeysEnabled = false;
+        emit preferencesChanged();
+        return false;
+    }
+    d->hotkeysEnabled = true;
+    updateHotkeyPause();
+    clearError();
+    emit preferencesChanged();
+    return true;
+#else
+    return false;
+#endif
+}
+bool AppBridge::openHotkeySettings() {
+#ifdef Q_OS_MAC
+    if (QDesktopServices::openUrl(QUrl(QStringLiteral(
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"))))
+        return true;
+    return fail("Could not open System Settings. Open Privacy & Security > Input Monitoring manually, enable Clumsier, then try Enable or Record again.");
 #else
     return false;
 #endif

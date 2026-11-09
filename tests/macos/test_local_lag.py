@@ -41,6 +41,21 @@ class Tests(unittest.TestCase):
         with self.assertRaises(ValueError):
             lag.rules('evil; flush', 1, 'out', [1, 2])
 
+    def test_any_tcp_rules_cover_both_families(self):
+        text = lag.rules('', 0, 'both', [1, 2])
+        self.assertEqual(len(text.splitlines()), 4)
+        for family in ('inet', 'inet6'):
+            self.assertIn(f'in quick {family} proto tcp from any to any pipe 1', text)
+            self.assertIn(f'out quick {family} proto tcp from any to any pipe 2', text)
+        self.assertNotIn('port ', text)
+        text = lag.rules('', 25565, 'out', [1, 2])
+        self.assertEqual(len(text.splitlines()), 2)
+        self.assertIn('to any port 25565 pipe 2', text)
+        self.assertNotIn('dummynet in', text)
+        for invalid in (-1, 65536, True, '22; flush'):
+            with self.assertRaises(ValueError):
+                lag.rules('', invalid, 'out', [1, 2])
+
     @patch.object(lag.time, 'sleep')
     def test_scoped_lifecycle(self, _sleep):
         fake = Fake()

@@ -235,3 +235,84 @@ API with the listen-only option. Permission checks use
 [`CGPreflightListenEventAccess`](https://developer.apple.com/documentation/coregraphics/cgpreflightlisteneventaccess())
 and user-initiated requests use
 [`CGRequestListenEventAccess`](https://developer.apple.com/documentation/coregraphics/cgrequestlisteneventaccess()).
+
+### Open hotkey privacy settings
+
+The Hotkeys page includes **Open Input Monitoring Settings**. The same action
+appears beside an Input Monitoring error, including on startup. It opens System
+Settings only when clicked; it does not grant permission or launch Settings
+automatically. Enable the current Clumsier app there, return, and try Enable or
+Record again. macOS may require quitting and reopening after changing access.
+If the deep link does not navigate correctly on your macOS version, open
+Privacy & Security > Input Monitoring manually. Rebuilt ad-hoc development
+bundles can need renewed consent.
+
+### Stable identity for local hotkey testing
+
+Use a valid code-signing certificate in your Keychain rather than the linker's
+ad-hoc signature. List available identities with `security find-identity -v -p
+codesigning`. Quit Clumsier before building/signing. Configure the existing build
+with your certificate's name or SHA-1 fingerprint:
+
+```sh
+cmake -S src/ui/qt -B build/qt-macos -DCMAKE_PREFIX_PATH=/opt/homebrew \
+  -DCLUMSIER_LOCAL_SIGN_IDENTITY='YOUR_CERTIFICATE_NAME_OR_FINGERPRINT'
+cmake --build build/qt-macos --parallel 4
+# Also run explicitly if the target was already up to date:
+sh scripts/sign-macos-local.sh 'YOUR_CERTIFICATE_NAME_OR_FINGERPRINT'
+```
+
+Do not use `-` as the identity. Signing binds the bundle identifier and metadata;
+keep the same certificate and app path for later builds. This does not bypass
+Input Monitoring: the previously approved ad-hoc build may need its entry
+removed and the newly certificate-signed app added once. Do not reset unrelated
+privacy entries. Reopen the app and test Record with a keyboard key before
+considering native hotkeys validated. Certificate signing alone does not prove
+keyboard delivery, and this is not a notarized release or Network Extension
+signing setup. The signing script refuses to modify a running app. An ordinary
+build without this option still uses linker/ad-hoc signing.
+
+### Locally reported acceptance: certificate-signed hotkeys
+
+On November 9, 2026, the contributor reported keyboard hotkeys working after
+signing the local Qt app using an Apple Development identity and approving the
+current app in Input Monitoring. Prior linker/ad-hoc builds repeatedly showed an
+enabled Settings entry while the running app failed the permission check; a
+mouse-only tap also produced misleading recording behavior. The reported
+success validates this local recovery workflow, not a causal proof for every
+permission failure, permissions surviving future upgrades, or clean-machine
+installation. Minus/Equals mapping and trailing Record-button mouse release
+have separate automated regression coverage; their native recording acceptance
+has not been independently confirmed here.
+
+Keep the same signing identity on subsequent builds. Do not ship private keys,
+reset all privacy permissions, or disable SIP/Gatekeeper to work around this.
+An Apple Development-signed local test is not a Developer ID-signed, notarized
+public release.
+
+### Player installer: remaining acceptance gate
+
+PF/dummynet gameplay, Qt controls, HUD and hotkeys have local user acceptance.
+The current launcher still requires the checkout, Python, and Terminal; this
+is not yet a self-contained installer. Before presenting it as player-ready:
+
+- Package Qt plugins/frameworks and a self-contained helper runtime, with no
+  Homebrew or system Python dependency. Validate supported OS/CPU floors.
+- Add explicit GUI administrator authorization for a narrowly scoped helper;
+  keep the GUI unprivileged and privileged installed code root-owned. Do not
+  create broad passwordless-sudo rules or execute user-writable code after an
+  unattended privilege grant.
+- Collect/confirm the target server endpoint in onboarding; show which endpoint
+  the helper actually authorizes, including when reusing an existing session.
+- Make Input Monitoring optional, provide Settings/retry actions, and verify a
+  keyboard event rather than declaring success because mouse capture works.
+- Verify app quit/crash, helper timeout, permission restart, repeated launches,
+  failed authorization, install/update/uninstall and recovery without touching
+  unrelated PF rules. Never start lag automatically at login.
+- Test a downloaded package on a clean Mac without development dependencies;
+  record its signing/notarization and Gatekeeper behavior truthfully.
+
+Recommended first artifact: a self-contained beta app bundle with a first-run
+server/authorization/optional-hotkeys wizard. A DMG is only its transport; it
+cannot solve privilege separation, missing runtimes or permission identity.
+Keep beta limitations explicit until the above checks pass.

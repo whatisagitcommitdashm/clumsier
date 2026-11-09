@@ -10,7 +10,7 @@ DummynetBackend::DummynetBackend(const QString &socketPath, QObject *parent) : Q
     socketPath_(socketPath.isEmpty() ? QString("/var/run/clumsier-lag-%1.sock").arg(getuid()) : socketPath) {
     connect(&socket_, &QLocalSocket::disconnected, this, [this] {
         bool active = running_; running_ = false;
-        if (active && !busy_) emit failed("The PF/dummynet helper disconnected. Check its Terminal for cleanup status.");
+        if (active && !busy_) emit failed("The PF/dummynet helper disconnected. Restart it with the local launcher; see docs/MACOS-LOCAL-LAG.md for recovery logs.");
     });
     heartbeat_.setInterval(2000);
     connect(&heartbeat_, &QTimer::timeout, this, [this] {
@@ -36,7 +36,7 @@ bool DummynetBackend::request(QJsonObject object, char *error) {
         pending_.clear();
         socket_.connectToServer(socketPath_);
         if (!socket_.waitForConnected(1000))
-            detail = "Start tools/macos_lag_helper.py with sudo in Terminal first. See docs/MACOS-LOCAL-LAG.md.";
+            detail = "Start the helper with scripts/start-macos-local.sh SERVER_IP [PORT], then retry Start. See docs/MACOS-LOCAL-LAG.md.";
     }
     if (detail.isEmpty()) {
         QEventLoop loop;
@@ -61,7 +61,7 @@ bool DummynetBackend::request(QJsonObject object, char *error) {
             ok = response["ok"].toBool(); running_ = response["running"].toBool();
             detail = response["error"].toString();
         } else {
-            detail = "PF/dummynet helper timed out or returned an invalid reply. Check Terminal for cleanup status.";
+            detail = "PF/dummynet helper timed out or returned an invalid reply. Check the recovery log described in docs/MACOS-LOCAL-LAG.md.";
             socket_.abort(); running_ = false;
         }
     }

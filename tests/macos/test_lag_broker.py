@@ -39,6 +39,25 @@ class Tests(unittest.TestCase):
                 self.start(**change)
         self.factory.assert_not_called()
 
+    def test_unrestricted_default_and_advanced_filters(self):
+        self.broker = Broker()
+        for changes, expected in (({}, ('', 0)),
+                ({'address': '::1'}, ('::1', 0)),
+                ({'port': 25565}, ('', 25565)),
+                ({'address': '15.204.237.8', 'port': 25565}, ('15.204.237.8', 25565))):
+            self.start(**changes)
+            self.factory.assert_called_with(*expected, 'both')
+            self.broker.stop()
+
+    def test_unrestricted_request_validation_precedes_session(self):
+        self.broker = Broker()
+        for changes in ({'address': 'evil; flush'}, {'address': None},
+                {'port': True}, {'port': '22'}, {'port': -1}, {'port': 65536},
+                {'protocol': True}, {'protocol': 2}, {'native': True}):
+            with self.assertRaises(ValueError):
+                self.start(**changes)
+        self.factory.assert_not_called()
+
     def test_partial_apply_rolls_back(self):
         self.start()
         self.session.runner.side_effect = [None, RuntimeError('failed'), None, None]

@@ -293,6 +293,22 @@ ColumnLayout {
         }
         Copy { visible: bridge.globalHotkeysAvailable && !bridge.hotkeysEnabled; text: "Hotkeys are off. You can still use all buttons and edit your bindings." }
         Copy { visible: bridge.globalHotkeySetupHint.length > 0; text: bridge.globalHotkeySetupHint }
+        QuietButton {
+            objectName: "openHotkeySettingsButton"
+            visible: bridge.globalHotkeySetupHint.length > 0
+            theme: panel.theme
+            text: "Open Input Monitoring Settings"
+            onClicked: bridge.openHotkeySettings()
+            helpText: "Enable Clumsier under Privacy & Security > Input Monitoring, then return and try Enable or Record again."
+        }
+        QuietButton {
+            objectName: "retryHotkeysButton"
+            visible: bridge.globalHotkeySetupHint.length > 0
+            theme: panel.theme
+            text: "Retry and enable hotkeys"
+            onClicked: bridge.retryHotkeys()
+            helpText: "Recheck Input Monitoring and recreate the input listener after changing permission."
+        }
         Copy { text: bridge.globalHotkeysAvailable
             ? "Click Record, hold your keyboard or mouse combination, then release. Input still reaches your game. Changes are saved immediately. Global actions pause while you edit text or use this tab."
             : "Global hotkeys are not yet available on this platform. Use the Start, Stop, and sequence playback buttons." }

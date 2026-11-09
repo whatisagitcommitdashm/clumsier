@@ -78,6 +78,10 @@ int main(int argc, char **argv) {
         QTemporaryDir edits;
         FakeNetwork capture;
         AppBridge bridge(capture.backend(), edits.path(), false);
+#ifdef Q_OS_MAC
+        check(!bridge.retryHotkeys(), "Retry cannot install hooks in a native-input-disabled session");
+        bridge.clearError();
+#endif
         check(bridge.quickDelay(50, 0) && bridge.execute(0), "Run before replacement test");
         capture.rejectStarts = 1;
         check(!bridge.quickDelay(200, 1) && capture.running && capture.accepted.inbound_ms == 50,
@@ -622,6 +626,21 @@ int main(int argc, char **argv) {
             bridge.discard(); bridge.selectPreset(savedId);
             check(find(quickWindow->contentItem(), "feedbackButton") == nullptr, "Discord feedback handoff is removed");
             window->setProperty("page", "hotkeys"); QTest::qWait(100);
+            auto *permissionButton = find(quickWindow->contentItem(), "openHotkeySettingsButton");
+            check(permissionButton && permissionButton->property("visible").toBool()
+                == !bridge.globalHotkeySetupHint().isEmpty(), "Permission settings action follows platform support");
+#ifdef Q_OS_MAC
+            bridge.reportBackendError("Global hotkeys need Input Monitoring permission.");
+            QTest::qWait(30);
+            auto *permissionErrorButton = find(quickWindow->contentItem(), "hotkeyPermissionSettingsButton");
+            check(permissionErrorButton && permissionErrorButton->property("visible").toBool(),
+                "Permission error offers settings shortcut");
+            bridge.reportBackendError("Unrelated network error");
+            QTest::qWait(30);
+            check(permissionErrorButton && !permissionErrorButton->property("visible").toBool(),
+                "Unrelated errors do not offer input settings");
+            bridge.clearError();
+#endif
             // macOS intentionally defaults global monitoring off; Windows may
             // begin enabled. Verify the toggle relative to its initial state.
             if (bridge.globalHotkeysAvailable()) {

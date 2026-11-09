@@ -97,6 +97,14 @@ if(APPLE)
         MACOSX_BUNDLE_BUNDLE_NAME Clumsier
         MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
         MACOSX_BUNDLE_BUNDLE_VERSION 1)
+    set(CLUMSIER_LOCAL_SIGN_IDENTITY "" CACHE STRING
+        "Optional certificate identity for stable local macOS app signing (not ad-hoc)")
+    if(CLUMSIER_LOCAL_SIGN_IDENTITY)
+        add_custom_command(TARGET clumsier-beta POST_BUILD
+            COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/sign-macos-local.sh"
+                "${CLUMSIER_LOCAL_SIGN_IDENTITY}" "$<TARGET_BUNDLE_DIR:clumsier-beta>"
+            VERBATIM)
+    endif()
 endif()
 
 include(CTest)
