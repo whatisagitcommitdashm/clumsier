@@ -125,3 +125,14 @@ Website source is in `website/`; deploy with `vercel deploy website --prod`.
 It uses no framework, analytics or external fonts. Update its versioned download
 link alongside each release. Axe artwork attribution is in
 `resources/macos/ATTRIBUTION.txt` and `website/assets/ATTRIBUTION.txt`.
+
+## DMG download
+
+The website now links to `Clumsier-macOS-arm64-beta.2.dmg`. Open the disk image,
+drag Clumsier.app onto Applications, then open it from Applications. Eject the
+disk image afterward. Networking installation and privacy approval stay the same.
+The DMG does not remove Gatekeeper checks and is not notarized.
+
+Maintainers can run `sh scripts/package-macos-dmg.sh` after making the app ZIP.
+It verifies the app signature before packaging and verifies the resulting image.
+The original ZIP stays available as an alternative release asset.
