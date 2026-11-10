@@ -49,7 +49,7 @@ mv "$WORK/payload/Install Clumsier.txt" "$WORK/payload/.background/Install Clums
 cp packaging/macos/dmg/background.png "$WORK/payload/.background/background.png"
 # Author Finder layout on a temporary writable image; never touch an existing
 # mounted Clumsier image or install the app. Finder may ask for automation access.
-VOLUME="Install Clumsier"
+VOLUME=${CLUMSIER_DMG_VOLUME:-Install Clumsier}
 if [ -e "/Volumes/$VOLUME" ]; then
     echo "Eject the existing $VOLUME disk image before rebuilding." >&2
     exit 1
