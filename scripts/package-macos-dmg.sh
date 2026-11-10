@@ -8,7 +8,12 @@ OUTPUT=${2:-dist/Clumsier-macOS-arm64-beta.2.dmg}
 test -f "$ZIP"
 command -v hdiutil >/dev/null
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/clumsier-dmg.XXXXXX")
-trap 'rm -rf "$WORK"' EXIT HUP INT TERM
+MOUNT=""
+cleanup() {
+    if [ -n "$MOUNT" ]; then hdiutil detach "$MOUNT" >/dev/null || true; fi
+    rm -rf "$WORK"
+}
+trap cleanup EXIT HUP INT TERM
 mkdir "$WORK/payload"
 ditto -x -k "$ZIP" "$WORK/payload"
 test -d "$WORK/payload/Clumsier.app"
@@ -35,8 +40,32 @@ Do not disable Gatekeeper or SIP. Stop if macOS reports detected malware.
 Setup guide: https://clumsier.vercel.app
 Source and release notes: https://github.com/Maximooch/clumsier
 GUIDE
-mkdir -p "$(dirname "$OUTPUT")"
-hdiutil create -volname 'Clumsier' -srcfolder "$WORK/payload" -format UDZO -ov "$OUTPUT"
+mkdir -p "$(dirname "$OUTPUT")" "$WORK/payload/.background"
+mv "$WORK/payload/Install Clumsier.txt" "$WORK/payload/.background/Install Clumsier.txt"
+cp packaging/macos/dmg/background.png "$WORK/payload/.background/background.png"
+# Author Finder layout on a temporary writable image; never touch an existing
+# mounted Clumsier image or install the app. Finder may ask for automation access.
+VOLUME="Install Clumsier"
+if [ -e "/Volumes/$VOLUME" ]; then
+    echo "Eject the existing $VOLUME disk image before rebuilding." >&2
+    exit 1
+fi
+hdiutil create -volname "$VOLUME" -srcfolder "$WORK/payload" -format UDRW "$WORK/layout.dmg"
+hdiutil attach -nobrowse -readwrite -plist "$WORK/layout.dmg" > "$WORK/mount.plist"
+MOUNT=$(python3 - "$WORK/mount.plist" <<'PYMOUNT'
+import plistlib, sys
+with open(sys.argv[1], 'rb') as f: data = plistlib.load(f)
+print(next(x['mount-point'] for x in data['system-entities'] if 'mount-point' in x))
+PYMOUNT
+)
+osascript packaging/macos/dmg/layout.applescript "$VOLUME"
+# Allow Finder to finish persisting the window metadata before detach.
+sync
+hdiutil detach "$MOUNT"
+MOUNT=""
+hdiutil convert "$WORK/layout.dmg" -format UDZO -ov -o "$OUTPUT"
+# Final artifact stays read-only and preserves the signed app.
+
 hdiutil verify "$OUTPUT"
 shasum -a 256 "$OUTPUT" > "$OUTPUT.sha256"
 echo "Created $OUTPUT (not notarized)."

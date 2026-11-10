@@ -136,3 +136,10 @@ The DMG does not remove Gatekeeper checks and is not notarized.
 Maintainers can run `sh scripts/package-macos-dmg.sh` after making the app ZIP.
 It verifies the app signature before packaging and verifies the resulting image.
 The original ZIP stays available as an alternative release asset.
+
+The DMG packager also authors Finder's saved icon-view layout: Clumsier on the
+left, Applications on the right, a background arrow and short instructions.
+Builds need an interactive macOS Finder session and may request Finder automation
+permission. Layout metadata is saved on a temporary writable image before final
+read-only compression. The guide text is retained inside the hidden background
+folder; the website remains the visible setup guide.
