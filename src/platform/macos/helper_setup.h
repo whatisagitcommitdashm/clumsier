@@ -14,6 +14,7 @@ public:
     bool busy() const { return process_.state() != QProcess::NotRunning; }
     QString message() const { return message_; }
     Q_INVOKABLE void authorize();
+    Q_INVOKABLE void installRuntime();
     Q_INVOKABLE void acknowledge();
     Q_PROPERTY(bool firstRun READ firstRun CONSTANT)
     bool firstRun() const;

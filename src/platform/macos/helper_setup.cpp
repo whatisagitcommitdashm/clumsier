@@ -5,6 +5,8 @@
 #include <QFile>
 #include <QDirIterator>
 #include <QSettings>
+#include <QDesktopServices>
+#include <QUrl>
 
 #include <sys/stat.h>
 #include <unistd.h>
@@ -67,6 +69,18 @@ bool MacHelperSetup::packaged() const {
 }
 bool MacHelperSetup::firstRun() const { return !QSettings().value("macLocalSetupSeen", false).toBool(); }
 void MacHelperSetup::acknowledge() { QSettings().setValue("macLocalSetupSeen", true); }
+void MacHelperSetup::installRuntime() {
+    if (busy() || !packaged()) return;
+    const QString path = QCoreApplication::applicationDirPath() + "/../Resources/Clumsier-Networking.pkg";
+    if (!QFileInfo::exists(path)) {
+        message_ = "This build uses the full installer. Install Clumsier using the release .pkg.";
+    } else if (QDesktopServices::openUrl(QUrl::fromLocalFile(path))) {
+        message_ = "Finish installing Networking in macOS Installer, then click Authorize networking. If blocked, approve this installer in Privacy & Security.";
+    } else {
+        message_ = "Could not open Networking installer. Open Clumsier.app/Contents/Resources/Clumsier-Networking.pkg manually.";
+    }
+    emit changed();
+}
 void MacHelperSetup::authorize() {
     if (busy() || !packaged()) return;
     QString error;

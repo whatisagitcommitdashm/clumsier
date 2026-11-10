@@ -91,10 +91,13 @@ if(WIN32)
 endif()
 set_target_properties(clumsier-beta PROPERTIES WIN32_EXECUTABLE TRUE)
 if(APPLE)
+    target_sources(clumsier-beta PRIVATE "${CLUMSIER_ROOT}/resources/macos/Clumsier.icns")
+    set_source_files_properties("${CLUMSIER_ROOT}/resources/macos/Clumsier.icns" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
     set_target_properties(clumsier-beta PROPERTIES
         MACOSX_BUNDLE TRUE
         OUTPUT_NAME Clumsier
         MACOSX_BUNDLE_GUI_IDENTIFIER org.clumsier.preview
+        MACOSX_BUNDLE_ICON_FILE Clumsier.icns
         MACOSX_BUNDLE_BUNDLE_NAME Clumsier
         MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
         MACOSX_BUNDLE_BUNDLE_VERSION 1)

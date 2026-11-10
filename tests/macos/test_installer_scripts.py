@@ -32,3 +32,15 @@ class Tests(unittest.TestCase):
         self.assertIn('--ownership recommended', script)
         self.assertIn('--onedir', script)
         self.assertNotIn('--onefile', script)
+
+    def test_app_download_installs_runtime_without_running_writable_code(self):
+        source = (ROOT / 'src/platform/macos/helper_setup.cpp').read_text()
+        self.assertIn('QDesktopServices::openUrl(QUrl::fromLocalFile(path))', source)
+        self.assertIn('Resources/Clumsier-Networking.pkg', source)
+        script = (ROOT / 'scripts/package-macos-app.sh').read_text()
+        self.assertIn('packaging/macos/networking-scripts', script)
+        self.assertIn('tools/sign_macos_payload.py', script)
+        helper_guard = (ROOT / 'packaging/macos/networking-scripts/preinstall').read_text()
+        self.assertNotIn('/Clumsier$|', helper_guard)
+        self.assertIn('clumsier-lag-*.sock', helper_guard)
+        self.assertIn('root-owned', helper_guard)

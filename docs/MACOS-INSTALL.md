@@ -103,3 +103,25 @@ Before publishing, complete the above manual matrix, downloaded-file security
 checks, and artifact-specific third-party license/source review. The bundled
 notices collector currently targets the tested Qt 6.11.2/Python 3.12.8 build;
 update it when changing SDK/runtime versions.
+
+## App ZIP beta 2
+
+The app-only download is `Clumsier-macOS-arm64-beta.2.zip`. Unzip, move
+Clumsier.app to Applications, and launch it there. In setup click **Install
+networking components…**, finish Apple Installer, then **Authorize networking**.
+The embedded helper-only package deliberately permits the GUI to remain open,
+but refuses replacement while a network helper or unresolved endpoint is active.
+It installs the same protected root-owned runtime as the full package. The ZIP
+is not a portable app that runs its privileged runtime from a writable bundle.
+Both the downloaded app and embedded installer may require per-item approval in
+Privacy & Security. This new install path still needs independent manual testing.
+
+To reproduce: run `scripts/package-macos-local.sh` with the selected identity
+and build Python, then `SIGN_IDENTITY=... sh scripts/package-macos-app.sh`.
+The second script consumes the first script's staged payload; do not use stale
+staging from an older source revision. It never installs or authorizes anything.
+
+Website source is in `website/`; deploy with `vercel deploy website --prod`.
+It uses no framework, analytics or external fonts. Update its versioned download
+link alongside each release. Axe artwork attribution is in
+`resources/macos/ATTRIBUTION.txt` and `website/assets/ATTRIBUTION.txt`.

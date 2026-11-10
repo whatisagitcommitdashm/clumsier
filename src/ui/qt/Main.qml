@@ -33,6 +33,7 @@ ApplicationWindow {
             spacing: 16
             Caption { Layout.fillWidth: true; text: "1. Authorize networking. Clumsier runs normally; only its scoped network helper receives administrator approval. No login service is installed." }
             Caption { Layout.fillWidth: true; text: "Delay affects all TCP applications by default, not just Minecraft. UDP is not delayed. Start stopped, use small values, and press Stop to restore normal traffic." }
+            QuietButton { theme: appTheme; text: "Install networking components…"; visible: localHelper !== null; enabled: localHelper && !localHelper.busy; onClicked: localHelper.installRuntime() }
             QuietButton { objectName: "localAuthorizeButton"; theme: appTheme; text: localHelper && localHelper.busy ? "Waiting for approval…" : "Authorize networking"; enabled: localHelper && !localHelper.busy; onClicked: localHelper.authorize() }
             Caption { Layout.fillWidth: true; text: localHelper ? localHelper.message : ""; visible: text.length > 0 }
             Caption { Layout.fillWidth: true; text: "2. Optional hotkeys. Open Hotkeys, enable Input Monitoring when asked, then Record a keyboard key to verify access. Mouse capture alone does not verify keyboard access. All playback buttons work without permission." }
