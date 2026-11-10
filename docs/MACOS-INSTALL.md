@@ -143,3 +143,42 @@ Builds need an interactive macOS Finder session and may request Finder automatio
 permission. Layout metadata is saved on a temporary writable image before final
 read-only compression. The guide text is retained inside the hidden background
 folder; the website remains the visible setup guide.
+
+## Intel testing beta (macOS 12+)
+
+The Intel download is separate from the Apple Silicon build. Build with Qt 6.8.3's
+universal macOS SDK and an Intel-capable Python with PyInstaller 6.22.3 installed.
+Rosetta is required when packaging on an Apple Silicon host. Run:
+
+```sh
+SIGN_IDENTITY=YOUR_CERTIFICATE \
+CLUMSIER_QT_ROOT=/path/to/Qt/6.8.3/macos \
+PYINSTALLER_PYTHON=/path/to/intel-venv/bin/python \
+sh scripts/package-macos-intel.sh
+
+CLUMSIER_DMG_ARCH=x86_64 CLUMSIER_DMG_MINIMUM=12.0 CLUMSIER_DMG_BETA=3 \
+sh scripts/package-macos-dmg.sh dist/Clumsier-macOS-x86_64-beta.3.zip \
+  dist/Clumsier-macOS-x86_64-beta.3.dmg
+```
+
+The default build SDK is the locally available macOS 15.5 Command Line Tools
+SDK. Override `CLUMSIER_MACOS_SDK` with another compatible SDK. Xcode 26 removed
+AGL, which Qt 6.8 links on Intel, so its SDK cannot build this kit unmodified.
+The packaging audit rejects every missing Intel slice, external non-system
+library dependency, and binary requiring newer than macOS 12. The optional
+Network Extension backend requires macOS 13; PF/dummynet is the default on 12.
+
+Build and all six macOS-specific Qt tests passed under Rosetta on macOS 15.7.
+The packaged GUI and helper help command loaded under Rosetta without developer
+PATH entries. No real Intel or macOS 12 installation/gameplay test has run yet.
+
+Before calling Intel supported, a player needs to test: downloading and dragging
+into Applications; per-item Gatekeeper approval; installing/authorizing the helper;
+0 ms Start, outbound delay, Stop; Input Monitoring and keyboard recording; HUD
+in windowed/full-screen Minecraft; quit/reopen and traffic recovery; uninstall.
+Use a practice run first. Report the exact macOS version and Mac model, no serial.
+
+If replacing the old full-PKG installation fails with a permissions warning,
+quit Clumsier, wait 70 seconds, move only Applications/Clumsier.app to Trash
+(authenticate if asked), then drag the new app from the DMG. Do not remove the
+root-owned networking helper or change its permissions.

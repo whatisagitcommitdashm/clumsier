@@ -156,7 +156,13 @@ static bool pumpStage(MacControl *control, MacReply *reply, int limitMs, const c
         return nil;
     }
     NSXPCConnection *connection = [[NSXPCConnection alloc] initWithMachServiceName:service options:0];
-    [connection setCodeSigningRequirement:macPeerRequirement(extensionID)];
+    if (@available(macOS 13.0, *)) {
+        [connection setCodeSigningRequirement:macPeerRequirement(extensionID)];
+    } else {
+        if (error) *error = @"The Network Extension backend requires macOS 13 or newer. Use the default PF/dummynet backend on this Mac.";
+        [connection invalidate];
+        return nil;
+    }
     connection.remoteObjectInterface = [NSXPCInterface interfaceWithProtocol:@protocol(ClumsierControl)];
     __weak MacControlHelper *weakSelf = self;
     __weak NSXPCConnection *weakConnection = connection;

@@ -44,3 +44,33 @@ class Tests(unittest.TestCase):
             with patch('audit_macos_package.subprocess.check_output', return_value='binary:\n'):
                 with self.assertRaisesRegex(RuntimeError, 'symlink'):
                     audit(root)
+
+    def test_intel_audits_only_requested_slice_and_sets_monterey_floor(self):
+        with tempfile.TemporaryDirectory() as root:
+            app, binary = self.fixture(root)
+            def output(args, **kwargs):
+                if args[0].endswith('lipo'):
+                    return 'x86_64 arm64'
+                self.assertEqual(args[1:3], ['-arch', 'x86_64'])
+                return 'binary:\n' if '-L' in args else 'cmd LC_BUILD_VERSION\n minos 11.0\n'
+            with patch('audit_macos_package.subprocess.check_output', side_effect=output):
+                report = audit(root, 'x86_64', '12.0', '12.0')
+            self.assertEqual(report['minimum_macos'], '12.0.0')
+            self.assertEqual(report['architecture'], 'x86_64')
+
+    def test_intel_rejects_arm_only_payload(self):
+        with tempfile.TemporaryDirectory() as root:
+            self.fixture(root)
+            with patch('audit_macos_package.subprocess.check_output', return_value='arm64'):
+                with self.assertRaisesRegex(RuntimeError, 'Missing x86_64'):
+                    audit(root, 'x86_64', '12.0', '12.0')
+
+    def test_intel_rejects_newer_macos_dependency(self):
+        with tempfile.TemporaryDirectory() as root:
+            self.fixture(root)
+            def output(args, **kwargs):
+                if args[0].endswith('lipo'): return 'x86_64'
+                return 'binary:\n' if '-L' in args else 'cmd LC_BUILD_VERSION\n minos 13.0\n'
+            with patch('audit_macos_package.subprocess.check_output', side_effect=output):
+                with self.assertRaisesRegex(RuntimeError, 'above requested'):
+                    audit(root, 'x86_64', '12.0', '12.0')

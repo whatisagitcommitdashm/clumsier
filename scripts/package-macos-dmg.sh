@@ -5,6 +5,10 @@ set -eu
 cd "$(dirname "$0")/.."
 ZIP=${1:-dist/Clumsier-macOS-arm64-beta.2.zip}
 OUTPUT=${2:-dist/Clumsier-macOS-arm64-beta.2.dmg}
+DMG_ARCH=${CLUMSIER_DMG_ARCH:-arm64}
+DMG_MINIMUM=${CLUMSIER_DMG_MINIMUM:-15.7}
+DMG_BETA=${CLUMSIER_DMG_BETA:-2}
+case "$DMG_ARCH" in arm64) CHIP='Apple Silicon';; x86_64) CHIP='Intel';; *) echo 'Unsupported architecture' >&2; exit 1;; esac
 test -f "$ZIP"
 command -v hdiutil >/dev/null
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/clumsier-dmg.XXXXXX")
@@ -19,9 +23,9 @@ ditto -x -k "$ZIP" "$WORK/payload"
 test -d "$WORK/payload/Clumsier.app"
 codesign --verify --deep --strict "$WORK/payload/Clumsier.app"
 ln -s /Applications "$WORK/payload/Applications"
-cat > "$WORK/payload/Install Clumsier.txt" <<'GUIDE'
-Clumsier for Mac — beta 2
-Apple Silicon · macOS 15.7 or later
+cat > "$WORK/payload/Install Clumsier.txt" <<GUIDE
+Clumsier for Mac — beta $DMG_BETA
+$CHIP · macOS $DMG_MINIMUM or later
 
 1. Quit any old Clumsier and wait 70 seconds for helper cleanup.
 2. Drag Clumsier.app onto Applications. Open it from Applications.
