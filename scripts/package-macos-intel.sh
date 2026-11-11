@@ -1,6 +1,8 @@
 #!/bin/sh
 # Experimental Intel package. No system installation or network activation.
 set -eu
+BETA=${CLUMSIER_RELEASE_BETA:-4}
+case "$BETA" in ""|*[!0-9]*) echo "Invalid release beta number" >&2; exit 1;; esac
 cd "$(dirname "$0")/.."
 : "${SIGN_IDENTITY:?Select the signing identity}"
 : "${CLUMSIER_QT_ROOT:?Select a Qt 6.8 SDK containing x86_64}"
@@ -55,6 +57,10 @@ pkgbuild --root "$WORK/helper-root" --identifier org.clumsier.local.networking \
     "$APP/Contents/Resources/Clumsier-Networking.pkg"
 codesign --force --sign "$SIGN_IDENTITY" --timestamp=none "$APP"
 codesign --verify --deep --strict "$APP"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.1.0" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BETA" "$APP/Contents/Info.plist"
+codesign --force --sign "$SIGN_IDENTITY" --timestamp=none "$APP"
+codesign --verify --deep --strict "$APP"
 mkdir -p dist
-ditto -c -k --sequesterRsrc --keepParent "$APP" dist/Clumsier-macOS-x86_64-beta.3.zip
-shasum -a 256 dist/Clumsier-macOS-x86_64-beta.3.zip > dist/Clumsier-macOS-x86_64-beta.3.zip.sha256
+ditto -c -k --sequesterRsrc --keepParent "$APP" dist/Clumsier-macOS-x86_64-beta.$BETA.zip
+shasum -a 256 dist/Clumsier-macOS-x86_64-beta.$BETA.zip > dist/Clumsier-macOS-x86_64-beta.$BETA.zip.sha256

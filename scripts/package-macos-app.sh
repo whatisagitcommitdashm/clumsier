@@ -1,6 +1,8 @@
 #!/bin/sh
 # Wrap the audited staged beta as a self-contained .app ZIP. No installation.
 set -eu
+BETA=${CLUMSIER_RELEASE_BETA:-4}
+case "$BETA" in ""|*[!0-9]*) echo "Invalid release beta number" >&2; exit 1;; esac
 cd "$(dirname "$0")/.."
 : "${SIGN_IDENTITY:?Set SIGN_IDENTITY}"
 WORK=build/macos-app-download
@@ -17,6 +19,10 @@ ditto resources/macos "$APP/Contents/Resources/AxeArtwork"
 chmod u+w "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleIconFile Clumsier.icns' "$APP/Contents/Info.plist" || /usr/libexec/PlistBuddy -c 'Add :CFBundleIconFile string Clumsier.icns' "$APP/Contents/Info.plist"
 python3 tools/sign_macos_payload.py "$ROOT" "$SIGN_IDENTITY"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.1.0" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BETA" "$APP/Contents/Info.plist"
+codesign --force --sign "$SIGN_IDENTITY" --timestamp=none "$APP"
+codesign --verify --deep --strict "$APP"
 mkdir -p dist
-ditto -c -k --sequesterRsrc --keepParent "$APP" dist/Clumsier-macOS-arm64-beta.2.zip
-shasum -a 256 dist/Clumsier-macOS-arm64-beta.2.zip > dist/Clumsier-macOS-arm64-beta.2.zip.sha256
+ditto -c -k --sequesterRsrc --keepParent "$APP" dist/Clumsier-macOS-arm64-beta.$BETA.zip
+shasum -a 256 dist/Clumsier-macOS-arm64-beta.$BETA.zip > dist/Clumsier-macOS-arm64-beta.$BETA.zip.sha256
