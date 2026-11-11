@@ -1,4 +1,5 @@
 #include <QGuiApplication>
+#include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
 #include <QTimer>
@@ -30,6 +31,14 @@ extern "C" {
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
+#ifdef Q_OS_MAC
+    const QIcon dockIcon(QStringLiteral(":/clumsier/app-icon.png"));
+    if (dockIcon.isNull() || dockIcon.pixmap(128, 128).isNull()) {
+        qCritical("Could not load the embedded macOS application icon.");
+        return 1;
+    }
+    app.setWindowIcon(dockIcon);
+#endif
     // Keep the original storage identity so existing preferences and the single-
     // instance lock survive the executable rename. This is not a release label.
     app.setOrganizationName("Clumsier");

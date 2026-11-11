@@ -91,6 +91,12 @@ if(WIN32)
 endif()
 set_target_properties(clumsier-beta PROPERTIES WIN32_EXECUTABLE TRUE)
 if(APPLE)
+    # Embed a PNG as well as Finder's ICNS so Qt can explicitly set the
+    # running application's Dock icon, independent of Launch Services caches.
+    qt_add_resources(clumsier-beta mac_app_icon
+        PREFIX "/clumsier"
+        BASE "${CLUMSIER_ROOT}/resources/macos"
+        FILES "${CLUMSIER_ROOT}/resources/macos/app-icon.png")
     target_sources(clumsier-beta PRIVATE "${CLUMSIER_ROOT}/resources/macos/Clumsier.icns")
     set_source_files_properties("${CLUMSIER_ROOT}/resources/macos/Clumsier.icns" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
     set_target_properties(clumsier-beta PROPERTIES
