@@ -23,6 +23,7 @@ class AppBridge : public QObject {
     Q_PROPERTY(QVariantList bindings READ bindings NOTIFY bindingsChanged)
     Q_PROPERTY(QString recording READ recording NOTIFY bindingsChanged)
     Q_PROPERTY(bool globalHotkeysAvailable READ globalHotkeysAvailable CONSTANT)
+    Q_PROPERTY(QString globalHotkeySetupHint READ globalHotkeySetupHint CONSTANT)
     Q_PROPERTY(bool hotkeysEnabled READ hotkeysEnabled WRITE setHotkeysEnabled NOTIFY preferencesChanged)
     Q_PROPERTY(bool autoSave READ autoSave WRITE setAutoSave NOTIFY preferencesChanged)
 public:
@@ -42,6 +43,7 @@ public:
     QVariantList bindings() const;
     QString recording() const;
     bool globalHotkeysAvailable() const;
+    QString globalHotkeySetupHint() const;
     void reportBackendError(const QString &message) { fail(message); }
     bool hotkeysEnabled() const;
     bool autoSave() const;
@@ -75,6 +77,8 @@ public:
     Q_INVOKABLE void cancelRecording();
     Q_INVOKABLE bool saveBinding(int action, const QString &text);
     Q_INVOKABLE void clearError();
+    Q_INVOKABLE bool openHotkeySettings();
+    Q_INVOKABLE bool retryHotkeys();
     Q_INVOKABLE QString shortcutForKey(int key, int modifiers) const;
 signals:
     void preferencesChanged();
@@ -93,6 +97,9 @@ private:
     void restoreServerAssociation();
     bool savePreference(const QString &key, bool value);
     void updateHotkeyPause();
+#ifdef Q_OS_MAC
+    bool startMacHotkeys(bool requestPermission);
+#endif
     QString matchingProfile(const QString &name) const;
     QString serverName(const QString &profileId) const;
     static AppBridge *listenerOwner;

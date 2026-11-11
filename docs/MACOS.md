@@ -1,14 +1,24 @@
-# macOS Lag prototype
+# macOS support
 
-The intended end-to-end prototype includes an AppKit host, Network Extension
-packet filter, shared JSON preset loading, manual baseline entry, and Start /
-Stop / Previous / Reset / Next controls. It is separate from the Windows UI and
-supports Lag only. No delay starts automatically.
+For local use without Apple membership, the Qt app now defaults to a scoped
+PF/dummynet helper. See [local setup](MACOS-LOCAL-LAG.md) for the Terminal command,
+authorization model, and limits. Start the helper before using Start in the GUI.
 
-**Validation:** the portable scheduler and packet-selection tests pass on Windows.
-The AppKit app, native framework integration, signing and packet delivery have
-not been compiled or exercised on a Mac. This is complete intended prototype
-source awaiting native verification, not a tested macOS release.
+The optional `--network-extension` backend uses a Network Extension packet filter for system-wide lag.
+It shares the preset library, quick controls, sequences and HUD with the other
+platforms. The macOS adapter activates and registers the provider, sends
+acknowledged settings over NSXPC and keeps a running session alive with
+heartbeats. A passive Core Graphics event tap supplies global keyboard and
+mouse-button hotkeys after the user grants Input Monitoring access. No delay
+starts automatically.
+
+**Validation:** the portable scheduler and synthetic packet-selection tests pass
+on macOS 15.7.3 (arm64), using macOS SDK 26.0. The Apple API probe and both the
+AppKit host and packet-provider executables compile and link with the existing
+strict warning flags. The shared prototype console tests also pass. These checks
+were run on September 13, 2026; they do not install or activate an extension.
+Signing, activation and real packet delivery remain unverified: the validation
+machine has no valid code-signing identity. This is not a tested macOS release.
 
 ## Build and run
 
@@ -16,8 +26,18 @@ Use macOS 13+ and Xcode command line tools. The minimum is 13 because both peers
 use the public [NSXPC signing-requirement API](https://developer.apple.com/documentation/foundation/nsxpcconnection/setcodesigningrequirement(_:)).
 
 For an initial compile/link check with **no Apple account or signing profiles**,
-run `sh scripts/build-macos-native.sh`. This creates standalone executables only;
-they cannot activate the provider without the signed bundle described below.
+configure and build the Qt project, then run its tests:
+
+```sh
+cmake -S src/ui/qt -B build/qt-macos -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/qt-macos --parallel 4
+ctest --test-dir build/qt-macos --output-on-failure
+build/qt-macos/Clumsier.app/Contents/MacOS/Clumsier --check-load
+```
+
+`sh scripts/build-macos-native.sh` separately verifies the provider and legacy
+AppKit prototype host. Neither unsigned build can activate the provider; use the
+signed bundle below for native acceptance.
 
 Register a host bundle identifier in your Apple Developer account, plus another
 with `.packet-filter` appended. Enable Network Extensions and the matching app
@@ -35,12 +55,19 @@ export BUNDLE_ID='YOUR_REGISTERED_HOST_BUNDLE_ID'
 export SIGN_IDENTITY='YOUR_DEVELOPER_ID_APPLICATION_SIGNING_IDENTITY'
 export HOST_PROFILE='/absolute/path/to/host.provisionprofile'
 export EXTENSION_PROFILE='/absolute/path/to/extension.provisionprofile'
+export CLUMSIER_QT_ROOT='/absolute/path/to/a/Qt/6.8+/macOS/kit'
 sh scripts/test-macos.sh
 sh scripts/build-macos-app.sh
 ```
 
-The script compiles and links both executables, generates metadata/entitlements,
-embeds your profiles, signs the nested extension then app, and verifies signatures.
+The Qt kit must itself support macOS 13; the packaging build treats deployment
+target warnings as errors so an SDK with a newer framework minimum cannot
+silently produce an app that falsely claims macOS 13 compatibility. Homebrew's
+current Qt packages are suitable for local development on the macOS versions
+they target, but may not satisfy that release floor. The script builds the Qt
+application, deploys its Qt frameworks with `macdeployqt`, compiles the provider,
+generates metadata/entitlements, embeds your profiles, signs the nested extension
+then app, and verifies signatures.
 Output is `build/macos/Clumsier.app`. Nothing is installed or activated. A valid
 signature does not prove that a profile authorizes every requested feature.
 
@@ -53,41 +80,50 @@ xcrun stapler staple build/macos/Clumsier.app
 ```
 
 Copy the signed app into `/Applications` before activation. Do not disable system
-protections to work around signing problems. Launch it, then:
+protections to work around signing problems. Launch it, then use Quick Controls
+or a saved sequence. The first Start may ask you to approve the system extension
+and network filter in System Settings.
 
-1. **Enable provider.** Approve the system extension and network filter in System
-   Settings when requested. An enabled provider initially allows traffic; it is
-   different from a running delay session.
-2. **Import sequence.** Select a shared Clumsier JSON file, such as
-   `examples/four-leaps.json`. Windows-native filter strings are rejected.
-3. Enter your normal server ping for target-ping mode. The field deliberately
-   starts blank. Added-delay mode may leave it blank.
-4. **Start**, then **Next**, **Previous**, or **Reset**. The cursor changes after
-   the provider accepts the setting. Navigation while stopped never starts delay.
-   The preset's `loop` setting controls wrapping.
-5. **Stop** releases queued packets and leaves the installed provider allowing
-   traffic. **Remove provider** removes this app's filter preferences and requests
-   deactivation. The app reports when macOS requires a restart.
+Global hotkeys default to off on macOS. The first **Enable** or **Record** click
+requests Input Monitoring access. If macOS opens System Settings, approve
+Clumsier under **Privacy & Security > Input Monitoring**, return to the app and
+try the action again. The listener is passive: it does not suppress or rewrite
+input, and playback buttons remain usable when access is absent or revoked.
 
-Activation can take time. If the initial command cannot connect, retry Stop after
-activation finishes, then Start. For signing errors, check the build output and
-macOS Console logs for Clumsier rather than assuming compilation proves activation.
+1. Choose a numeric remote IP, protocol/port and traffic direction as needed.
+   Windows-native filter strings are rejected by shared validation.
+2. Start Quick Controls or a sequence. For target-ping sequences, enter the
+   normal ping measured while Clumsier is stopped.
+3. Approve the extension/filter if macOS asks. The UI commits running state only
+   after the provider acknowledges the command.
+4. Apply another quick delay or navigate the sequence. Already-held packets are
+   governed by the newly acknowledged delay while retaining arrival timestamps.
+5. Stop to release queued packets and leave the installed provider allowing
+   traffic. Removing the installed extension is still a manual/system operation.
+
+Activation can take time. If the initial command times out while approval is
+pending, finish approval, retry Stop to reconcile provider state, then Start.
+For signing errors, check build output and macOS Console logs rather than assuming
+compilation proves activation. Do not run the legacy AppKit prototype at the same
+time: the provider accepts one controlling client.
 
 ## Implementation
 
-`src/platform/macos/host.m` owns the minimal UI and asynchronous cursor changes.
-Both host and provider reuse the shared `presetParse`, `presetValidate` and
-`presetResolve`: no duplicate file schema or target-ping arithmetic. The host
-does not force asynchronous activation/XPC into the synchronous `AppController`
-interface, which would block the UI. Its cursor bridge commits acknowledged
-transitions only.
+`src/platform/macos/qt_backend.cpp` implements the shared `NetworkBackendOps`
+contract. `mac_control.mm` bridges that synchronous controller contract to
+asynchronous extension activation, filter registration and XPC replies with
+bounded nested event-loop waits. Each stage, provider connection and heartbeat
+has a generation token so late callbacks cannot commit stale state. Both sides
+reuse `presetParse`, `presetValidate` and `presetResolve`: there is no duplicate
+file schema or target-ping arithmetic.
 
 `control.h` sends bounded JSON, baseline and step messages over NSXPC. Both peers
 require the configured signing team and exact peer bundle identifier. One host
 connection controls a provider; requests must belong to that current connection.
 Errors/timeouts report uncertainty instead of pretending unacknowledged changes
-succeeded. The host sends heartbeats every three seconds; the provider flushes
-on disconnect or stops after roughly ten seconds without heartbeats.
+succeeded. The Qt backend sends heartbeats every three seconds while running;
+the provider flushes on disconnect or stops after roughly ten seconds without
+heartbeats.
 
 `provider.m` owns the filter, timer and retained packet objects. The native delay
 call executes on the actual packet callback thread under a short state lock.
@@ -122,9 +158,18 @@ broaden a user's filter. Loopback, tunnel interfaces, offload and VPN coexistenc
 need native observation. Start tests with ordinary Ethernet/Wi-Fi peer traffic;
 avoid fragmented datagrams when selecting ports.
 
-There is no macOS preset editor, persisted library, global hotkeys, wheel control,
-timed playback or UI parity. Importing shared sequences and operating their steps
-is this prototype's scope.
+The Qt preset library is persisted using the portable non-Windows Qt store.
+`hotkey_listener.mm` owns a listen-only session event tap on a dedicated run-loop
+thread. Its callback queues canonical key/button transitions to the Qt thread;
+the shared matcher performs recording, overlap handling, pause boundaries and
+action dispatch there. Left/right modifiers normalize to one saved name, while
+their physical held states remain separate. Settings use atomic writes and the
+same version-3 action names as Windows. Tap-disable notifications clear held
+state before the listener is re-enabled.
+
+Signed activation, real packet timing, hotkeys while a game is focused,
+permission revocation, sleep/wake, VPN and load behavior still require native
+acceptance before release.
 
 ## Tests and native acceptance
 
@@ -133,8 +178,10 @@ Windows verification used GCC C11 with `-Wall -Wextra -Werror -pedantic`, plus
 `-lws2_32` for address parsing. Coverage includes original timestamps, delay
 increase/decrease, exact release boundaries, zero, direction disable, invalid
 settings, stop/restart, limits, truncated frames, IPs, VLAN, IPv6 headers/fragments.
-The small `build-macos-probe.sh` compiles API references only; the full app build
-is the next native check.
+The small `build-macos-probe.sh` compiles API references only.
+`build-macos-native.sh` also compiles and links the host and provider; both checks
+pass on the Mac recorded above. Signed bundle activation and packet acceptance
+are the next native checks.
 
 After building/signing, record macOS/SDK version, CPU architecture and interface:
 
@@ -154,6 +201,10 @@ After building/signing, record macOS/SDK version, CPU architecture and interface
 - Force-terminate the provider and document retained-packet loss and future
   traffic recovery. Exercise sleep/wake, interface changes, load and a VPN before
   everyday use. Never reset global firewall rules as a cleanup shortcut.
+- Grant, deny and revoke Input Monitoring. Verify keyboard chords, left/right
+  modifiers, F-keys, Mouse1-5, recording, pause while editing, enable/disable and
+  repeated app shutdown while another application or game has focus. Input must
+  continue reaching that application.
 
 ## Primary references
 
@@ -177,3 +228,98 @@ use neither that workaround nor PF rules. Review Apple's
 [current Developer Program terms](https://developer.apple.com/support/terms/apple-developer-program-license-agreement/)
 before distribution; this project's account entitlements/distribution eligibility
 have not been independently verified.
+
+Global input uses Apple's public
+[`CGEventTapCreate`](https://developer.apple.com/documentation/coregraphics/cgevent/tapcreate(tap:place:options:eventsofinterest:callback:userinfo:))
+API with the listen-only option. Permission checks use
+[`CGPreflightListenEventAccess`](https://developer.apple.com/documentation/coregraphics/cgpreflightlisteneventaccess())
+and user-initiated requests use
+[`CGRequestListenEventAccess`](https://developer.apple.com/documentation/coregraphics/cgrequestlisteneventaccess()).
+
+### Open hotkey privacy settings
+
+The Hotkeys page includes **Open Input Monitoring Settings**. The same action
+appears beside an Input Monitoring error, including on startup. It opens System
+Settings only when clicked; it does not grant permission or launch Settings
+automatically. Enable the current Clumsier app there, return, and try Enable or
+Record again. macOS may require quitting and reopening after changing access.
+If the deep link does not navigate correctly on your macOS version, open
+Privacy & Security > Input Monitoring manually. Rebuilt ad-hoc development
+bundles can need renewed consent.
+
+### Stable identity for local hotkey testing
+
+Use a valid code-signing certificate in your Keychain rather than the linker's
+ad-hoc signature. List available identities with `security find-identity -v -p
+codesigning`. Quit Clumsier before building/signing. Configure the existing build
+with your certificate's name or SHA-1 fingerprint:
+
+```sh
+cmake -S src/ui/qt -B build/qt-macos -DCMAKE_PREFIX_PATH=/opt/homebrew \
+  -DCLUMSIER_LOCAL_SIGN_IDENTITY='YOUR_CERTIFICATE_NAME_OR_FINGERPRINT'
+cmake --build build/qt-macos --parallel 4
+# Also run explicitly if the target was already up to date:
+sh scripts/sign-macos-local.sh 'YOUR_CERTIFICATE_NAME_OR_FINGERPRINT'
+```
+
+Do not use `-` as the identity. Signing binds the bundle identifier and metadata;
+keep the same certificate and app path for later builds. This does not bypass
+Input Monitoring: the previously approved ad-hoc build may need its entry
+removed and the newly certificate-signed app added once. Do not reset unrelated
+privacy entries. Reopen the app and test Record with a keyboard key before
+considering native hotkeys validated. Certificate signing alone does not prove
+keyboard delivery, and this is not a notarized release or Network Extension
+signing setup. The signing script refuses to modify a running app. An ordinary
+build without this option still uses linker/ad-hoc signing.
+
+### Locally reported acceptance: certificate-signed hotkeys
+
+On November 9, 2026, the contributor reported keyboard hotkeys working after
+signing the local Qt app using an Apple Development identity and approving the
+current app in Input Monitoring. Prior linker/ad-hoc builds repeatedly showed an
+enabled Settings entry while the running app failed the permission check; a
+mouse-only tap also produced misleading recording behavior. The reported
+success validates this local recovery workflow, not a causal proof for every
+permission failure, permissions surviving future upgrades, or clean-machine
+installation. Minus/Equals mapping and trailing Record-button mouse release
+have separate automated regression coverage; their native recording acceptance
+has not been independently confirmed here.
+
+Keep the same signing identity on subsequent builds. Do not ship private keys,
+reset all privacy permissions, or disable SIP/Gatekeeper to work around this.
+An Apple Development-signed local test is not a Developer ID-signed, notarized
+public release.
+
+### Player installer: remaining acceptance gate
+
+PF/dummynet gameplay, Qt controls, HUD and hotkeys have local user acceptance.
+The current launcher still requires the checkout, Python, and Terminal; this
+is not yet a self-contained installer. Before presenting it as player-ready:
+
+- Package Qt plugins/frameworks and a self-contained helper runtime, with no
+  Homebrew or system Python dependency. Validate supported OS/CPU floors.
+- Add explicit GUI administrator authorization for a narrowly scoped helper;
+  keep the GUI unprivileged and privileged installed code root-owned. Do not
+  create broad passwordless-sudo rules or execute user-writable code after an
+  unattended privilege grant.
+- Collect/confirm the target server endpoint in onboarding; show which endpoint
+  the helper actually authorizes, including when reusing an existing session.
+- Make Input Monitoring optional, provide Settings/retry actions, and verify a
+  keyboard event rather than declaring success because mouse capture works.
+- Verify app quit/crash, helper timeout, permission restart, repeated launches,
+  failed authorization, install/update/uninstall and recovery without touching
+  unrelated PF rules. Never start lag automatically at login.
+- Test a downloaded package on a clean Mac without development dependencies;
+  record its signing/notarization and Gatekeeper behavior truthfully.
+
+Recommended first artifact: a self-contained beta app bundle with a first-run
+server/authorization/optional-hotkeys wizard. A DMG is only its transport; it
+cannot solve privilege separation, missing runtimes or permission identity.
+Keep beta limitations explicit until the above checks pass.
+
+### Self-contained PF/dummynet beta package
+
+See [macOS installation](MACOS-INSTALL.md) for the local beta packaging pipeline,
+GUI administrator authorization, first-run guidance, update/uninstall behavior,
+and clean-machine/distribution acceptance gates. This is independent of the
+Network Extension packaging script and needs no Network Extension profiles.

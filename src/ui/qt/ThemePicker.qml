@@ -155,7 +155,13 @@ Popup {
                         implicitWidth: 30; implicitHeight: 30
                         text: picker.favoriteIds.includes(row.modelData.id) ? "★" : "☆"
                         Accessible.name: "Favorite " + row.modelData.name
-                        onClicked: picker.favoriteToggled(row.modelData.id)
+                        onClicked: {
+                            picker.favoriteToggled(row.modelData.id);
+                            // Click focus policies differ by platform; keyboard
+                            // flow (Enter/arrows) must keep working after a mouse
+                            // favorite toggle, so hand focus back to the search hub.
+                            search.forceActiveFocus(Qt.MouseFocusReason);
+                        }
                         Keys.onReturnPressed: picker.applySelection()
                         Keys.onDownPressed: picker.moveSelection(1)
                         Keys.onUpPressed: picker.moveSelection(-1)

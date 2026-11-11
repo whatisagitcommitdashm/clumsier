@@ -168,8 +168,10 @@
         [connection setCodeSigningRequirement:macPeerRequirement([self extensionID])];
         connection.remoteObjectInterface = [NSXPCInterface interfaceWithProtocol:@protocol(ClumsierControl)];
         __weak NSXPCConnection *weakConnection = connection;
-        connection.interruptionHandler = ^{ [self connectionLost:weakConnection]; };
-        connection.invalidationHandler = ^{ [self connectionLost:weakConnection]; };
+        // The host owns the connection; its retained handlers must not own the host.
+        __weak ClumsierApp *weakSelf = self;
+        connection.interruptionHandler = ^{ [weakSelf connectionLost:weakConnection]; };
+        connection.invalidationHandler = ^{ [weakSelf connectionLost:weakConnection]; };
         [connection resume];
     }
     NSXPCConnection *current = connection;

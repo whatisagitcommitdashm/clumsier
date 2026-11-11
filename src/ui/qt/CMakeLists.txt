@@ -38,7 +38,21 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_library(clumsier-linux-qt STATIC ../../platform/linux/preset_store.cpp ../../platform/linux/qt_backend.cpp)
     target_link_libraries(clumsier-linux-qt PUBLIC clumsier-core Qt6::Core)
 endif()
-if(WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(APPLE)
+    enable_language(OBJCXX)
+    find_package(Qt6 6.8 REQUIRED COMPONENTS Network)
+    add_library(clumsier-macos-qt STATIC
+        ../../platform/macos/helper_setup.cpp
+        ../../platform/macos/qt_backend.cpp ../../platform/macos/mac_control.mm
+        ../../platform/macos/dummynet_backend.cpp ../../platform/macos/hud_window.mm
+        ../../platform/macos/hotkeys.cpp ../../platform/macos/hotkey_listener.mm
+        ../../platform/linux/preset_store.cpp)
+    target_compile_options(clumsier-macos-qt PRIVATE -fobjc-arc -fblocks)
+    target_link_libraries(clumsier-macos-qt PUBLIC clumsier-core Qt6::Core Qt6::Network Qt6::Quick
+        "-framework Foundation" "-framework CoreGraphics" "-framework AppKit"
+        "-framework NetworkExtension" "-framework SystemExtensions")
+endif()
+if(WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
     add_library(clumsier-qt-bridge STATIC app_bridge.cpp)
     qt_add_resources(clumsier-qt-bridge starter_presets
         PREFIX "/starter-presets" BASE "${CLUMSIER_ROOT}/resources/starter-presets"
@@ -48,12 +62,14 @@ if(WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(clumsier-qt-bridge PUBLIC Qt6::Quick)
     if(WIN32)
         target_link_libraries(clumsier-qt-bridge PUBLIC clumsier-windows)
-    else()
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         target_link_libraries(clumsier-qt-bridge PUBLIC clumsier-linux-qt)
+    else()
+        target_link_libraries(clumsier-qt-bridge PUBLIC clumsier-macos-qt)
     endif()
 endif()
 
-# The QML shell uses live adapters on Windows and Linux.
+# The QML shell uses live adapters on Windows, Linux and macOS.
 qt_add_executable(clumsier-beta main.cpp window_chrome.cpp hud_stacking.cpp)
 qt_add_qml_module(clumsier-beta
     URI Clumsier.Beta
@@ -74,6 +90,32 @@ if(WIN32)
     endif()
 endif()
 set_target_properties(clumsier-beta PROPERTIES WIN32_EXECUTABLE TRUE)
+if(APPLE)
+    # Embed a PNG as well as Finder's ICNS so Qt can explicitly set the
+    # running application's Dock icon, independent of Launch Services caches.
+    qt_add_resources(clumsier-beta mac_app_icon
+        PREFIX "/clumsier"
+        BASE "${CLUMSIER_ROOT}/resources/macos"
+        FILES "${CLUMSIER_ROOT}/resources/macos/app-icon.png")
+    target_sources(clumsier-beta PRIVATE "${CLUMSIER_ROOT}/resources/macos/Clumsier.icns")
+    set_source_files_properties("${CLUMSIER_ROOT}/resources/macos/Clumsier.icns" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    set_target_properties(clumsier-beta PROPERTIES
+        MACOSX_BUNDLE TRUE
+        OUTPUT_NAME Clumsier
+        MACOSX_BUNDLE_GUI_IDENTIFIER org.clumsier.preview
+        MACOSX_BUNDLE_ICON_FILE Clumsier.icns
+        MACOSX_BUNDLE_BUNDLE_NAME Clumsier
+        MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
+        MACOSX_BUNDLE_BUNDLE_VERSION 1)
+    set(CLUMSIER_LOCAL_SIGN_IDENTITY "" CACHE STRING
+        "Optional certificate identity for stable local macOS app signing (not ad-hoc)")
+    if(CLUMSIER_LOCAL_SIGN_IDENTITY)
+        add_custom_command(TARGET clumsier-beta POST_BUILD
+            COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/sign-macos-local.sh"
+                "${CLUMSIER_LOCAL_SIGN_IDENTITY}" "$<TARGET_BUNDLE_DIR:clumsier-beta>"
+            VERBATIM)
+    endif()
+endif()
 
 include(CTest)
 if(BUILD_TESTING)
@@ -113,4 +155,29 @@ if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     qt_add_executable(qt-store-test ../../../tests/linux/qt_store.cpp)
     target_link_libraries(qt-store-test PRIVATE clumsier-linux-qt)
     add_test(NAME qt-linux-store COMMAND qt-store-test)
+endif()
+if(BUILD_TESTING AND APPLE)
+    qt_add_executable(qt-mac-setup-test ../../../tests/macos/qt_helper_setup.cpp)
+    target_link_libraries(qt-mac-setup-test PRIVATE clumsier-macos-qt Qt6::QuickControls2 Qt6::Test)
+    target_compile_definitions(qt-mac-setup-test PRIVATE BETA_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME qt-mac-setup COMMAND qt-mac-setup-test)
+    qt_add_executable(qt-mac-hud-test ../../../tests/macos/hud_window.mm)
+    target_compile_options(qt-mac-hud-test PRIVATE -fobjc-arc)
+    target_link_libraries(qt-mac-hud-test PRIVATE clumsier-macos-qt)
+    add_test(NAME qt-mac-hud COMMAND qt-mac-hud-test)
+    qt_add_executable(qt-mac-dummynet-test ../../../tests/macos/qt_dummynet.cpp)
+    target_include_directories(qt-mac-dummynet-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../..)
+    target_link_libraries(qt-mac-dummynet-test PRIVATE clumsier-macos-qt Qt6::Network)
+    add_test(NAME qt-mac-dummynet COMMAND qt-mac-dummynet-test)
+    qt_add_executable(qt-mac-hotkeys-test ../../../tests/macos/hotkeys.cpp)
+    target_include_directories(qt-mac-hotkeys-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../..)
+    target_link_libraries(qt-mac-hotkeys-test PRIVATE clumsier-macos-qt Qt6::Core)
+    add_test(NAME qt-mac-hotkeys COMMAND qt-mac-hotkeys-test)
+    qt_add_executable(qt-mac-backend-test ../../../tests/macos/qt_backend.cpp)
+    target_include_directories(qt-mac-backend-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
+    target_link_libraries(qt-mac-backend-test PRIVATE clumsier-macos-qt Qt6::Test)
+    add_test(NAME qt-mac-backend COMMAND qt-mac-backend-test)
+    qt_add_executable(qt-mac-store-test ../../../tests/linux/qt_store.cpp)
+    target_link_libraries(qt-mac-store-test PRIVATE clumsier-macos-qt)
+    add_test(NAME qt-mac-store COMMAND qt-mac-store-test)
 endif()

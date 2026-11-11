@@ -7,6 +7,10 @@
 #include <unordered_map>
 #endif
 
+#ifdef Q_OS_MAC
+void macConfigureHudWindow(QQuickWindow *window);
+#endif
+
 struct HudStacking::Data {
     QPointer<QQuickWindow> window;
     QTimer settle;
@@ -68,6 +72,17 @@ struct HudStacking::Data {
 
 HudStacking::HudStacking(QQuickWindow *window) : d(std::make_unique<Data>()) {
     d->window = window;
+#ifdef Q_OS_MAC
+    connect(window, &QWindow::visibleChanged, this, [window](bool visible) {
+        if (visible) macConfigureHudWindow(window);
+    });
+    // Reapply after Qt has processed a show, including restored/minimized state.
+    connect(window, &QWindow::visibilityChanged, this, [window](QWindow::Visibility visibility) {
+        if (visibility != QWindow::Hidden && visibility != QWindow::Minimized)
+            macConfigureHudWindow(window);
+    });
+    macConfigureHudWindow(window);
+#endif
 #ifdef Q_OS_WIN
     d->handle = reinterpret_cast<HWND>(window->winId());
     d->settle.setSingleShot(true);

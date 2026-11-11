@@ -16,8 +16,32 @@ ApplicationWindow {
     visible: true
     flags: Qt.Window | Qt.FramelessWindowHint | Qt.WindowMinMaxButtonsHint | Qt.WindowCloseButtonHint
     title: backend ? "Clumsier" : "Clumsier — UI prototype"
+    property var localHelper: null
+    Component.onCompleted: {
+        if (localHelper && localHelper.packaged && localHelper.firstRun) localSetup.open()
+    }
+    QuietDialog {
+        id: localSetup
+        objectName: "localSetupDialog"
+        theme: appTheme
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: Math.min(560, window.width - 40)
+        modal: true
+        title: "Set up Clumsier for macOS"
+        contentItem: ColumnLayout {
+            spacing: 16
+            Caption { Layout.fillWidth: true; text: "1. Authorize networking. Clumsier runs normally; only its scoped network helper receives administrator approval. No login service is installed." }
+            Caption { Layout.fillWidth: true; text: "Delay affects all TCP applications by default, not just Minecraft. UDP is not delayed. Start stopped, use small values, and press Stop to restore normal traffic." }
+            QuietButton { theme: appTheme; text: "Install networking components…"; visible: localHelper !== null; enabled: localHelper && !localHelper.busy; onClicked: localHelper.installRuntime() }
+            QuietButton { objectName: "localAuthorizeButton"; theme: appTheme; text: localHelper && localHelper.busy ? "Waiting for approval…" : "Authorize networking"; enabled: localHelper && !localHelper.busy; onClicked: localHelper.authorize() }
+            Caption { Layout.fillWidth: true; text: localHelper ? localHelper.message : ""; visible: text.length > 0 }
+            Caption { Layout.fillWidth: true; text: "2. Optional hotkeys. Open Hotkeys, enable Input Monitoring when asked, then Record a keyboard key to verify access. Mouse capture alone does not verify keyboard access. All playback buttons work without permission." }
+            QuietButton { objectName: "localSetupContinueButton"; theme: appTheme; text: "Continue"; onClicked: { localHelper.acknowledge(); localSetup.close(); } }
+        }
+    }
     property var backend: null
-    readonly property bool inputPaused: sequenceMenu.visible || deleteSequencesDialog.visible || batchExport.visible || unsavedDialog.visible || themePicker.visible || (active && (page === "hotkeys" || !!activeFocusItem && (activeFocusItem instanceof TextInput || activeFocusItem instanceof TextEdit))) || (liveLoader.item ? liveLoader.item.dialogOpen : false)
+    readonly property bool inputPaused: localSetup.visible || sequenceMenu.visible || deleteSequencesDialog.visible || batchExport.visible || unsavedDialog.visible || themePicker.visible || (active && (page === "hotkeys" || !!activeFocusItem && (activeFocusItem instanceof TextInput || activeFocusItem instanceof TextEdit))) || (liveLoader.item ? liveLoader.item.dialogOpen : false)
     onInputPausedChanged: if (backend) backend.setInputPaused(inputPaused)
     onClosing: function(event) {
         if (backend && backend.dirty) {
@@ -658,6 +682,11 @@ ApplicationWindow {
                                 objectName: "advancedModeSetting"; theme: appTheme; text: "Advanced mode"; helpText: "Expose protocol, direction, address, port, and Windows filter controls for sequences."; checked: preferences.advancedMode
                                 onToggled: { preferences.advancedMode = checked; preferences.setValue("advancedMode", checked); preferences.sync(); }
                             }
+                            Caption {
+                                visible: preferences.advancedMode && Qt.platform.os === "osx"
+                                Layout.fillWidth: true
+                                text: "Local PF/dummynet mode affects all TCP traffic by default, not just Minecraft; advanced target filters can narrow it (0–1000 ms per direction). Retained-packet retiming and lossless Stop may differ from the Network Extension scheduler. Check the helper Terminal if disconnected."
+                            }
                             QuietCheckBox {
                                 objectName: "autoSaveSetting"; visible: !!backend; theme: appTheme; text: "Autosave sequences"
                                 helpText: "Save valid edits after a brief pause in typing. Invalid entries stay editable without replacing the saved sequence."
@@ -869,8 +898,34 @@ ApplicationWindow {
                 }
             }
         }
+        QuietButton {
+            objectName: "localNetworkingSetupButton"
+            visible: localHelper !== null && localHelper.packaged
+            Layout.leftMargin: 24
+            theme: appTheme
+            text: "Set up networking"
+            onClicked: localSetup.open()
+        }
+        QuietButton {
+            id: hotkeyPermissionSettingsButton
+            objectName: "hotkeyPermissionSettingsButton"
+            visible: backend && backend.globalHotkeySetupHint.length > 0
+                && backend.error.indexOf("Input Monitoring") >= 0
+            Layout.leftMargin: 24
+            theme: appTheme
+            text: "Open Input Monitoring Settings"
+            onClicked: backend.openHotkeySettings()
+        }
+        QuietButton {
+            objectName: "retryHotkeyPermissionButton"
+            visible: hotkeyPermissionSettingsButton.visible
+            Layout.leftMargin: 24
+            theme: appTheme
+            text: "Retry and enable hotkeys"
+            onClicked: backend.retryHotkeys()
+        }
         Caption { text: backend ? backend.error : ""; visible: backend && backend.error !== ""; Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24; Layout.bottomMargin: 16; color: appTheme.accent }
-        Caption { text: notice; visible: notice !== ""; Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24; Layout.bottomMargin: 12; color: appTheme.accent }
+        Caption { text: notice; visible: notice !== "" && (!backend || notice !== backend.error); Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24; Layout.bottomMargin: 12; color: appTheme.accent }
         Rule { visible: preferences.showHints }
         RowLayout {
             visible: preferences.showHints

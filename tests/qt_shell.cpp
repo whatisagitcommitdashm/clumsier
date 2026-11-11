@@ -146,6 +146,11 @@ int main(int argc, char **argv)
         QTest::qWait(450);
         ok &= check(!window->property("sidebarOpen").toBool(), "Mouse leave closes even after clicking inside");
     }
+    // QShortcut dispatch requires an active window on macOS. A previous HUD
+    // or desktop interaction can legitimately deactivate this test window.
+    window->requestActivate();
+    ok &= check(QTest::qWaitForWindowActive(window), "Shell window active before drawer shortcut");
+    window->contentItem()->forceActiveFocus();
     QTest::keyClick(window, Qt::Key_B, Qt::ControlModifier);
     QTest::qWait(200);
     ok &= check(window->property("sidebarOpen").toBool(), "Keyboard reveals drawer");

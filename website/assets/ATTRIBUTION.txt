@@ -1,0 +1,6 @@
+Clumsier axe artwork
+Source: https://raw.githubusercontent.com/minetest/minetest_game/9e895af6e9feb98332fa1a778001442f5669bc20/mods/default/textures/default_tool_steelaxe.png
+Minetest Game contributors (see axe-license.txt for attribution).
+Texture licensed CC BY-SA 3.0: https://creativecommons.org/licenses/by-sa/3.0/
+Changes: nearest-neighbor enlargement; rounded dark app-icon background.
+Adapted artwork also CC BY-SA 3.0. Not affiliated with Minecraft/Mojang.

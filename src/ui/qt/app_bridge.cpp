@@ -5,6 +5,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QFileInfo>
+#include <QDesktopServices>
 #include <QSettings>
 #include <QTimer>
 #include <QDir>
@@ -12,7 +13,11 @@
 #include <QRegularExpression>
 #include <QKeySequence>
 #include <QFile>
+#include <QStandardPaths>
 #include <algorithm>
+#ifdef Q_OS_MAC
+#include "platform/macos/hotkeys.h"
+#endif
 extern "C" {
 #include "core/controller.h"
 #ifdef _WIN32
@@ -26,7 +31,7 @@ extern "C" {
 struct AppBridge::Data {
     AppController controller{};
     PresetStore store{};
-    bool opened = false, listening = false, paused = false;
+    bool opened = false, listening = false, paused = false, nativeHotkeysAllowed = false;
     QVariantList presets, profiles;
     QVariantMap draft, saved;
     QString id, profile, error, recording, lastProfile;
@@ -34,6 +39,10 @@ struct AppBridge::Data {
 #ifdef Q_OS_WIN
     HotkeySettings keys{};
     wchar_t keyPath[MAX_PATH]{};
+#elif defined(Q_OS_MAC)
+    HotkeySettings keys{};
+    QString keyPath;
+    std::unique_ptr<MacHotkeyListener> macHotkeys;
 #endif
     int recordAction = -1;
     QString activity = "quick controls";
@@ -62,6 +71,7 @@ static std::wstring wide(const QString &text) { return text.toStdWString(); }
 
 AppBridge::AppBridge(NetworkBackend backend, const QString &root, bool enableHotkeys, QObject *parent)
     : QObject(parent), d(std::make_unique<Data>()) {
+    d->nativeHotkeysAllowed = enableHotkeys;
     controllerInit(&d->controller, backend);
     quickDelay(0, 0);
     char error[NETWORK_ERROR_SIZE]{};
@@ -72,7 +82,11 @@ AppBridge::AppBridge(NetworkBackend backend, const QString &root, bool enableHot
         d->associationsPath = QString::fromWCharArray(d->store.root) + "/sequence-servers.ini";
         d->preferencesPath = QString::fromWCharArray(d->store.root) + "/preferences.ini";
         QSettings preferences(d->preferencesPath, QSettings::IniFormat);
+#ifdef Q_OS_MAC
+        d->hotkeysEnabled = preferences.value("hotkeysEnabled", false).toBool();
+#else
         d->hotkeysEnabled = preferences.value("hotkeysEnabled", true).toBool();
+#endif
         d->autoSave = preferences.value("autoSave", false).toBool();
         d->lastProfile = preferences.value("lastServer").toString();
         for (int i = 0; i < ACTION_COUNT; ++i) d->bindingEnabled[i] = preferences.value(QString("bindingEnabled/%1").arg(i), true).toBool();
@@ -97,6 +111,23 @@ AppBridge::AppBridge(NetworkBackend backend, const QString &root, bool enableHot
         if (!d->listening || !hotkeysApply(&d->keys, nullptr, error)) fail(QString::fromUtf8(error));
         updateHotkeyPause();
     }
+#elif defined(Q_OS_MAC)
+    macHotkeyDefaults(&d->keys);
+    d->keyPath = root.isEmpty()
+        ? QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/hotkeys.ini"
+        : root + "/hotkeys.ini";
+    if (enableHotkeys) {
+        QDir().mkpath(QFileInfo(d->keyPath).absolutePath());
+        if (!macHotkeyLoad(d->keyPath, &d->keys, error)) fail(QString::fromUtf8(error));
+        d->macHotkeys = std::make_unique<MacHotkeyListener>(this);
+        listenerOwner = this;
+        if (d->hotkeysEnabled) {
+            if (!startMacHotkeys(false)) {
+                d->hotkeysEnabled = false;
+            }
+        }
+        updateHotkeyPause();
+    }
 #else
     Q_UNUSED(enableHotkeys);
 #endif
@@ -113,6 +144,8 @@ AppBridge::AppBridge(NetworkBackend backend, const QString &root, bool enableHot
 AppBridge::~AppBridge() {
 #ifdef Q_OS_WIN
     if (d->listening) hotkeysClose();
+#elif defined(Q_OS_MAC)
+    if (d->macHotkeys) d->macHotkeys->close();
 #endif
     if (listenerOwner == this) listenerOwner = nullptr;
     controllerShutdown(&d->controller);
@@ -207,10 +240,58 @@ QString AppBridge::error() const { return d->error; }
 QString AppBridge::profileId() const { return d->profile; }
 QString AppBridge::recording() const { return d->recording; }
 bool AppBridge::globalHotkeysAvailable() const {
-#ifdef Q_OS_WIN
+#if defined(Q_OS_WIN) || defined(Q_OS_MAC)
     return true;
 #else
     return false;
+#endif
+}
+bool AppBridge::retryHotkeys() {
+#ifdef Q_OS_MAC
+    if (!d->nativeHotkeysAllowed)
+        return fail("Global hotkeys are unavailable in this session.");
+    // Explicit retry must re-create the tap, not trust a stale open flag.
+    cancelRecording();
+    if (d->macHotkeys) d->macHotkeys->close();
+    d->listening = false;
+    d->inputSuspended = false;
+    if (!startMacHotkeys(true)) {
+        d->hotkeysEnabled = false;
+        updateHotkeyPause();
+        emit preferencesChanged();
+        return false;
+    }
+    if (!savePreference("hotkeysEnabled", true)) {
+        d->macHotkeys->close();
+        d->listening = false;
+        d->hotkeysEnabled = false;
+        emit preferencesChanged();
+        return false;
+    }
+    d->hotkeysEnabled = true;
+    updateHotkeyPause();
+    clearError();
+    emit preferencesChanged();
+    return true;
+#else
+    return false;
+#endif
+}
+bool AppBridge::openHotkeySettings() {
+#ifdef Q_OS_MAC
+    if (QDesktopServices::openUrl(QUrl(QStringLiteral(
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"))))
+        return true;
+    return fail("Could not open System Settings. Open Privacy & Security > Input Monitoring manually, enable Clumsier, then try Enable or Record again.");
+#else
+    return false;
+#endif
+}
+QString AppBridge::globalHotkeySetupHint() const {
+#ifdef Q_OS_MAC
+    return "The first Enable or Record click may ask for Input Monitoring access. After approving Clumsier in System Settings, try the action again.";
+#else
+    return {};
 #endif
 }
 QVariantMap AppBridge::state() const {
@@ -595,10 +676,15 @@ bool AppBridge::selectStep(int index) {
 }
 QVariantList AppBridge::bindings() const {
     QVariantList result;
-#ifdef Q_OS_WIN
+#if defined(Q_OS_WIN) || defined(Q_OS_MAC)
     for (int i = 0; i < ACTION_COUNT; ++i) {
-        char text[HOTKEY_TEXT_SIZE]{}; hotkeyFormat(d->keys.bindings[i], text);
-        result.append(QVariantMap{{"action", i}, {"name", QString::fromUtf8(actionName(AppAction(i)))}, {"text", QString::fromUtf8(text)}, {"enabled", d->bindingEnabled[i]}});
+#ifdef Q_OS_WIN
+        char raw[HOTKEY_TEXT_SIZE]{}; hotkeyFormat(d->keys.bindings[i], raw);
+        const QString text = QString::fromUtf8(raw);
+#else
+        const QString text = QString::fromUtf8(macHotkeyFormat(d->keys.bindings[i]));
+#endif
+        result.append(QVariantMap{{"action", i}, {"name", QString::fromUtf8(actionName(AppAction(i)))}, {"text", text}, {"enabled", d->bindingEnabled[i]}});
     }
 #endif
     return result;
@@ -615,6 +701,9 @@ void AppBridge::updateHotkeyPause() {
     // regardless of how many UI reasons currently need shortcuts suspended.
 #ifdef Q_OS_WIN
     if (suspend) hotkeysPause(); else hotkeysResume();
+#elif defined(Q_OS_MAC)
+    if (!d->macHotkeys) return;
+    if (suspend) d->macHotkeys->pause(); else d->macHotkeys->resume();
 #endif
     d->inputSuspended = suspend;
 }
@@ -626,8 +715,40 @@ bool AppBridge::savePreference(const QString &key, bool value) {
     preferences.setValue(key, value); preferences.sync();
     return preferences.status() == QSettings::NoError || fail("Could not save your preference.");
 }
+#ifdef Q_OS_MAC
+bool AppBridge::startMacHotkeys(bool requestPermission) {
+    if (d->listening) return true;
+    if (!d->nativeHotkeysAllowed)
+        return fail("Global hotkeys are unavailable in this session.");
+    if (!d->macHotkeys) d->macHotkeys = std::make_unique<MacHotkeyListener>(this);
+    listenerOwner = this;
+    char error[MAC_HOTKEY_ERROR_SIZE]{};
+    d->listening = d->macHotkeys->open([](AppAction action) {
+        if (listenerOwner) listenerOwner->executeHotkey(int(action));
+    }, requestPermission, error);
+    if (!d->listening) return fail(QString::fromUtf8(error));
+    if (!d->macHotkeys->apply(d->keys, {}, error)) {
+        d->macHotkeys->close();
+        d->listening = false;
+        return fail(QString::fromUtf8(error));
+    }
+    // Apply may save settings later; opening only installs the in-memory copy.
+    // Pause state is owned by the bridge so enabling after a dialog closes
+    // does not inherit stale held input.
+    updateHotkeyPause();
+    clearError();
+    return true;
+}
+#endif
 void AppBridge::setHotkeysEnabled(bool enabled) {
-    if (d->hotkeysEnabled == enabled || !savePreference("hotkeysEnabled", enabled)) return;
+    if (d->hotkeysEnabled == enabled) return;
+#ifdef Q_OS_MAC
+    if (enabled && d->nativeHotkeysAllowed && !startMacHotkeys(true)) {
+        emit preferencesChanged();
+        return;
+    }
+#endif
+    if (!savePreference("hotkeysEnabled", enabled)) return;
     d->hotkeysEnabled = enabled;
     updateHotkeyPause();
     emit preferencesChanged();
@@ -644,7 +765,13 @@ bool AppBridge::executeHotkey(int action) {
     return action >= 0 && action < ACTION_COUNT && d->bindingEnabled[action] && d->hotkeysEnabled && !d->paused && execute(action);
 }
 void AppBridge::recordBinding(int action) {
-    if (!d->listening || action < 0 || action >= ACTION_COUNT) { fail("Global hotkeys are unavailable."); return; }
+    if (action < 0 || action >= ACTION_COUNT) { fail("Unknown action."); return; }
+#ifdef Q_OS_MAC
+    // Recording needs the same passive event tap, even while action execution
+    // is disabled. Ask only in direct response to the user's Record click.
+    if (d->nativeHotkeysAllowed && !d->listening && !startMacHotkeys(true)) return;
+#endif
+    if (!d->listening) { fail("Global hotkeys are unavailable."); return; }
     d->recordAction = action; d->recording = "Press your keys or mouse buttons, then release them."; emit bindingsChanged();
 #ifdef Q_OS_WIN
     hotkeysRecordBegin([](const HotkeyBinding *binding, BOOL finished) {
@@ -659,11 +786,26 @@ void AppBridge::recordBinding(int action) {
             emit owner->bindingsChanged();
         }
     });
+#elif defined(Q_OS_MAC)
+    d->macHotkeys->record([](const HotkeyBinding &binding, bool finished) {
+        auto *owner = listenerOwner;
+        if (!owner) return;
+        const QString text = QString::fromUtf8(macHotkeyFormat(binding));
+        owner->d->recording = text; emit owner->bindingsChanged();
+        if (finished) {
+            const int action = owner->d->recordAction;
+            owner->d->recordAction = -1; owner->d->recording.clear();
+            owner->saveBinding(action, text);
+            emit owner->bindingsChanged();
+        }
+    });
 #endif
 }
 void AppBridge::cancelRecording() {
 #ifdef Q_OS_WIN
     if (d->listening) hotkeysRecordCancel();
+#elif defined(Q_OS_MAC)
+    if (d->listening) d->macHotkeys->cancelRecord();
 #endif
     d->recordAction = -1; d->recording.clear(); emit bindingsChanged();
 }
@@ -674,9 +816,16 @@ bool AppBridge::saveBinding(int action, const QString &text) {
     if (!hotkeyParse(text.toUtf8().constData(), &next.bindings[action], error) || !hotkeyValidate(&next, error)) return fail(QString::fromUtf8(error));
     if (d->listening && !hotkeysApply(&next, d->keyPath, error)) return fail(QString::fromUtf8(error));
     d->keys = next; clearError(); emit bindingsChanged(); return true;
+#elif defined(Q_OS_MAC)
+    HotkeySettings next = d->keys; char error[MAC_HOTKEY_ERROR_SIZE]{};
+    if (!macHotkeyParse(text.toUtf8().constData(), &next.bindings[action], error)
+        || !macHotkeyValidate(&next, error)) return fail(QString::fromUtf8(error));
+    if (d->listening && !d->macHotkeys->apply(next, d->keyPath, error)) return fail(QString::fromUtf8(error));
+    if (!d->listening && !macHotkeySave(d->keyPath, &next, error)) return fail(QString::fromUtf8(error));
+    d->keys = next; clearError(); emit bindingsChanged(); return true;
 #else
     Q_UNUSED(text);
-    return fail("Global hotkeys are not yet available on Linux. Use the playback buttons.");
+    return fail("Global hotkeys are not yet available on this platform. Use the playback buttons.");
 #endif
 }
 

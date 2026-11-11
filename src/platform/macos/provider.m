@@ -51,11 +51,14 @@ static void allowPacket(void *context, void *pointer) {
     if (ready.count) dispatch_group_leave(deliveries);
 }
 - (void)startFilterWithCompletionHandler:(void (^)(NSError *))completion {
+    __weak ClumsierPacketProvider *weakSelf = self;
     [self withState:^{
         self->available = YES;
         self->timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, self->owner);
         dispatch_source_set_timer(self->timer, dispatch_time(DISPATCH_TIME_NOW, 0), 2 * NSEC_PER_MSEC, NSEC_PER_MSEC);
         dispatch_source_set_event_handler(self->timer, ^{
+            ClumsierPacketProvider *self = weakSelf;
+            if (!self) return;
             [self withState:^{
                 uint64_t now = milliseconds();
                 if (self->held.running && now - self->lastContact > 10000) macHeldStop(&self->held);
@@ -71,6 +74,9 @@ static void allowPacket(void *context, void *pointer) {
          * framework callback thread, inside the packet handler lifetime. */
         self.packetHandler = ^NEFilterPacketProviderVerdict(NEFilterPacketContext *context, nw_interface_t interface, NETrafficDirection direction, const void *bytes, size_t length) {
             (void)interface;
+            // Keep the provider alive for this callback, not for the block's lifetime.
+            ClumsierPacketProvider *self = weakSelf;
+            if (!self) return NEFilterPacketProviderVerdictAllow;
             __block NEFilterPacketProviderVerdict verdict = NEFilterPacketProviderVerdictAllow;
             [self withState:^{
                 BOOL outbound = direction == NETrafficDirectionOutbound;
@@ -108,7 +114,10 @@ static void allowPacket(void *context, void *pointer) {
     connection.exportedInterface = [NSXPCInterface interfaceWithProtocol:@protocol(ClumsierControl)];
     connection.exportedObject = self;
     __weak NSXPCConnection *weakConnection = connection;
+    __weak ClumsierPacketProvider *weakSelf = self;
     void (^lost)(void) = ^{
+        ClumsierPacketProvider *self = weakSelf;
+        if (!self) return;
         [self withState:^{
             if (self->client == weakConnection) {
                 macHeldStop(&self->held);
