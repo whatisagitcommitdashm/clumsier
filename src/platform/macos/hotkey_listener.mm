@@ -214,6 +214,7 @@ void MacHotkeyListener::close() {
     }
     if (impl_->thread.joinable()) impl_->thread.join();
     impl_->resetInput();
+    impl_->dispatcher.endSession();
 }
 
 bool MacHotkeyListener::isOpen() const {

@@ -146,6 +146,41 @@ int main(int argc, char **argv) {
     ok &= check(recordingFinished && recorded.keys[MAC_KEY_A] && recorded.keys[MAC_KEY_F],
         "Recording captures a chord and finishes after all releases");
 
+    // Retry from the Hotkeys tab closes a paused listener and opens a new
+    // one. The bridge reapplies one UI pause, then removes it on tab exit.
+    MacHotkeyDispatcher retry;
+    HotkeySettings retryKeys{};
+    macHotkeyParse("F7", &retryKeys.bindings[ACTION_START_CAPTURE], error);
+    macHotkeyParse("F6", &retryKeys.bindings[ACTION_STOP_CAPTURE], error);
+    retry.apply(retryKeys);
+    int retryActions = 0;
+    retry.setActionCallback([&](AppAction) { ++retryActions; });
+    retry.pause();
+    retry.endSession();
+    retry.setActionCallback([&](AppAction) { ++retryActions; });
+    retry.apply(retryKeys);
+    retry.pause();
+    HotkeyBinding retryRecorded{};
+    retry.record([&](const HotkeyBinding &value, bool done) {
+        if (done) retryRecorded = value;
+    });
+    retry.input(MAC_KEY_F7, true);
+    retry.input(MAC_KEY_F7, false);
+    ok &= check(retryRecorded.keys[MAC_KEY_F7] && retryActions == 0,
+        "Recording works while the reopened listener is paused");
+    retry.resume();
+    retry.input(MAC_KEY_F7, true);
+    retry.input(MAC_KEY_F7, false);
+    retry.input(MAC_KEY_F6, true);
+    retry.input(MAC_KEY_F6, false);
+    ok &= check(retryActions == 2,
+        "F7/F6 execute after retrying a paused listener and leaving Hotkeys");
+    retry.pause();
+    retry.reset();
+    retry.input(MAC_KEY_F7, true);
+    retry.input(MAC_KEY_F7, false);
+    ok &= check(retryActions == 2, "Tap timeout reset preserves the current UI pause");
+
     if (ok) std::puts("PASS macOS key mapping, binding format, validation and persistence");
     return ok ? 0 : 1;
 }

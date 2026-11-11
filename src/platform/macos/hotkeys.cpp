@@ -242,6 +242,12 @@ void MacHotkeyDispatcher::input(unsigned int physicalKey, bool down) {
 
 void MacHotkeyDispatcher::reset() { synchronize(); }
 
+void MacHotkeyDispatcher::endSession() {
+    // A replacement listener gets its pause state from AppBridge afresh.
+    // Never carry a previous tap's pauses, callbacks or bindings into it.
+    *this = MacHotkeyDispatcher{};
+}
+
 void MacHotkeyDispatcher::pause() {
     ++pauseDepth_;
     synchronize();

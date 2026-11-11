@@ -71,6 +71,7 @@ public:
     void setActionCallback(ActionCallback callback) { actionCallback_ = std::move(callback); }
     void input(unsigned int physicalKey, bool down);
     void reset();
+    void endSession();
     void pause();
     void resume();
     void record(RecordCallback callback);
